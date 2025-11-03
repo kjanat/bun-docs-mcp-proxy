@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Rust-based MCP (Model Context Protocol) proxy that bridges stdio-based MCP clients (like Zed) with the HTTP/SSE-based Bun documentation server at `https://bun.com/docs/mcp`. Acts as a protocol adapter: receives JSON-RPC 2.0 over stdin, forwards to Bun Docs HTTP API, parses SSE responses, and returns JSON-RPC over stdout.
+Rust-based MCP (Model Context Protocol) proxy that bridges stdio-based MCP clients (like Zed) with the HTTP/SSE-based
+Bun documentation server at `https://bun.com/docs/mcp`. Acts as a protocol adapter: receives JSON-RPC 2.0 over stdin,
+forwards to Bun Docs HTTP API, parses SSE responses, and returns JSON-RPC over stdout.
 
 ## Essential Commands
 
@@ -14,8 +16,14 @@ Rust-based MCP (Model Context Protocol) proxy that bridges stdio-based MCP clien
 # Build optimized release binary
 cargo build --release
 
-# Run test suite (requires jq)
-./test-proxy.sh
+# Run all tests
+cargo test
+
+# Run tests with Makefile
+make test
+
+# Generate coverage report (uses cargo-llvm-cov)
+make coverage
 
 # Run with debug logging
 RUST_LOG=debug ./target/release/bun-docs-mcp-proxy
@@ -47,7 +55,8 @@ cargo build --release --target x86_64-pc-windows-msvc
 
 **Module Breakdown**:
 
-- `src/main.rs` - Event loop: read stdin → dispatch by method → write stdout. Handles `initialize`, `tools/list`, `tools/call`
+- `src/main.rs` - Event loop: read stdin → dispatch by method → write stdout. Handles `initialize`, `tools/list`,
+  `tools/call`
 - `src/protocol/` - JSON-RPC 2.0 types (`JsonRpcRequest`, `JsonRpcResponse`, `JsonRpcError`) with success/error builders
 - `src/transport/` - `StdioTransport`: async line-based stdin reader + stdout writer with flush
 - `src/http/` - `BunDocsClient`: HTTP client with SSE parser. Extracts `result` field from SSE data events
@@ -75,16 +84,43 @@ cargo build --release --target x86_64-pc-windows-msvc
 
 ## Testing
 
-`test-proxy.sh` validates:
+**Test Coverage: 85.98%** (552/642 lines)
 
-1. `tools/list` returns `SearchBun` tool
-2. `initialize` returns server info with version from `CARGO_PKG_VERSION`
-3. `tools/call` with `SearchBun` returns search results
-4. Invalid JSON returns `-32700` parse error
-5. Unknown method returns `-32601` error
-6. Performance metrics (binary size, startup time, request time)
+### Test Suite (46 tests)
 
-Tests expect `jq` installed and use `timeout` for request tests.
+**Unit Tests** (41 tests):
+
+- `src/protocol/mod.rs` - JSON-RPC serialization/deserialization (100% coverage)
+- `src/http/mod.rs` - HTTP client, SSE parsing, mocked API tests (95.45% coverage)
+- `src/transport/mod.rs` - Stdio transport logic (56.10% coverage)
+- `src/main.rs` - Handler functions, error paths (84.00% coverage)
+
+**Integration Tests** (5 tests):
+
+- `tests/integration_test.rs` - Protocol compliance, response structure validation
+
+**Shell Integration Test**:
+
+- `test-proxy.sh` - End-to-end proxy validation (requires `jq`)
+
+### Running Tests
+
+```bash
+# All tests
+cargo test
+
+# With Makefile
+make test
+
+# Coverage report (uses cargo-llvm-cov)
+make coverage
+
+# Coverage summary
+make coverage-text
+```
+
+Tests use `cargo-llvm-cov` (not tarpaulin) for accurate async coverage.
+Mock HTTP server tests use `mockito` for reliable async test execution.
 
 ## Protocol Implementation
 
@@ -104,10 +140,13 @@ Tests expect `jq` installed and use `timeout` for request tests.
 
 ## Common Issues
 
-**Binary size increased**: Check release profile settings in `Cargo.toml`. Verify `strip = true`, `opt-level = "z"`, and `lto = true`.
+**Binary size increased**: Check release profile settings in `Cargo.toml`. Verify `strip = true`, `opt-level = "z"`, and
+`lto = true`.
 
-**SSE parsing fails**: Bun Docs API may have changed response format. Check `src/http/mod.rs:85` for result/error field detection logic.
+**SSE parsing fails**: Bun Docs API may have changed response format. Check `src/http/mod.rs:85` for result/error field
+detection logic.
 
-**Timeout on tests**: Default HTTP timeout is 5s (`REQUEST_TIMEOUT_SECS`). Network issues or Bun API slowness may require adjustment.
+**Timeout on tests**: Default HTTP timeout is 5s (`REQUEST_TIMEOUT_SECS`). Network issues or Bun API slowness may
+require adjustment.
 
 **Cross-compilation fails**: Ensure target toolchain installed with `rustup target add <target-triple>`.

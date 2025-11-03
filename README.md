@@ -91,6 +91,30 @@ make coverage-text
 # Or: cargo llvm-cov
 ```
 
+Generate coverage in different formats:
+
+```bash
+# LCOV format (for CI)
+cargo llvm-cov --lcov --output-path lcov.info
+
+# Cobertura XML format
+cargo llvm-cov --cobertura --output-path cobertura.xml
+
+# JSON format
+cargo llvm-cov --json --output-path coverage.json
+```
+
+### JUnit Test Results
+
+For JUnit XML test results (separate from coverage), install cargo-nextest:
+
+```bash
+cargo install cargo-nextest --locked
+
+# Generate JUnit XML
+cargo nextest run --profile ci --junit junit.xml
+```
+
 ### Manual Testing
 
 Test a specific method:
@@ -140,12 +164,11 @@ sequenceDiagram
     participant Client as stdin (JSON-RPC)
     participant Proxy
     participant Server as bun.com/docs/mcp
-
-    Client->>Proxy: JSON-RPC
-    Proxy->>Server: HTTP POST
-    Server-->>Proxy: SSE stream
+    Client ->> Proxy: JSON-RPC
+    Proxy ->> Server: HTTP POST
+    Server -->> Proxy: SSE stream
     Note over Proxy: Event parsing
-    Proxy-->>Client: JSON-RPC (stdout)
+    Proxy -->> Client: JSON-RPC (stdout)
 ```
 
 ### Module Structure
@@ -279,5 +302,7 @@ Built with:
 - Cargo
 - Standard async Rust ecosystem
 
-See [docs/protocol-analysis.md](../docs/protocol-analysis.md) for protocol details.  
-See [docs/rmcp-evaluation.md](../docs/rmcp-evaluation.md) for architecture decisions.
+See [docs/protocol-analysis.md](https://github.com/kjanat/bun-docs-mcp-zed/blob/16daa944a9fb12d58a19c23751f5b4bb18fb3a68/docs/protocol-analysis.md)
+for protocol details.  
+See [docs/rmcp-evaluation.md](https://github.com/kjanat/bun-docs-mcp-zed/blob/16daa944a9fb12d58a19c23751f5b4bb18fb3a68/docs/rmcp-evaluation.md)
+for architecture decisions.
