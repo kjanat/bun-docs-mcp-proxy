@@ -1,5 +1,7 @@
 # Bun Docs MCP Proxy
 
+[![CI](https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/ci.yml)
+
 Native Rust proxy for Bun documentation MCP context server. Bridges Zed's stdio-based MCP client with the Bun HTTP MCP
 server at `https://bun.com/docs/mcp`.
 
