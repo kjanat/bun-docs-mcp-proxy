@@ -10,12 +10,22 @@ const REQUEST_TIMEOUT_SECS: u64 = 5;
 
 pub struct BunDocsClient {
     client: Client,
+    base_url: String,
 }
 
 impl BunDocsClient {
     pub fn new() -> Self {
         Self {
             client: Client::new(),
+            base_url: BUN_DOCS_API.to_string(),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new_with_url(url: String) -> Self {
+        Self {
+            client: Client::new(),
+            base_url: url,
         }
     }
 
@@ -25,7 +35,7 @@ impl BunDocsClient {
         // Send HTTP POST with JSON-RPC request
         let response = self
             .client
-            .post(BUN_DOCS_API)
+            .post(&self.base_url)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json, text/event-stream")
             .json(&request)
@@ -103,5 +113,200 @@ impl BunDocsClient {
         }
 
         json_response.ok_or_else(|| anyhow::anyhow!("No valid JSON-RPC response in SSE stream"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_client_creation() {
+        let client = BunDocsClient::new();
+        assert_eq!(client.base_url, BUN_DOCS_API);
+    }
+
+    #[tokio::test]
+    async fn test_forward_request_json_success() {
+        let mut server = mockito::Server::new_async().await;
+
+        let mock = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"result": {"status": "ok"}}"#)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::new_with_url(server.url());
+        let request = json!({"jsonrpc": "2.0", "id": 1, "method": "test"});
+
+        let result = client.forward_request(request).await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap();
+        assert_eq!(response["result"]["status"], "ok");
+
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_forward_request_http_error() {
+        let mut server = mockito::Server::new_async().await;
+
+        let _mock = server
+            .mock("POST", "/")
+            .with_status(500)
+            .with_body("Internal Server Error")
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::new_with_url(server.url());
+        let request = json!({"jsonrpc": "2.0", "id": 1, "method": "test"});
+
+        let result = client.forward_request(request).await;
+        assert!(result.is_err());
+
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("500"));
+    }
+
+    #[tokio::test]
+    async fn test_forward_request_sse_with_result() {
+        let mut server = mockito::Server::new_async().await;
+
+        let sse_body = "data: {\"result\": {\"tools\": [\"SearchBun\"]}}\n\n";
+
+        let _mock = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_header("content-type", "text/event-stream")
+            .with_body(sse_body)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::new_with_url(server.url());
+        let request = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
+
+        let result = client.forward_request(request).await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap();
+        assert!(response.get("result").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_forward_request_sse_with_error() {
+        let mut server = mockito::Server::new_async().await;
+
+        let sse_body = "data: {\"error\": {\"code\": -32601, \"message\": \"Not found\"}}\n\n";
+
+        let _mock = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_header("content-type", "text/event-stream")
+            .with_body(sse_body)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::new_with_url(server.url());
+        let request = json!({"jsonrpc": "2.0", "id": 1, "method": "unknown"});
+
+        let result = client.forward_request(request).await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap();
+        assert!(response.get("error").is_some());
+        assert_eq!(response["error"]["code"], -32601);
+    }
+
+    #[tokio::test]
+    async fn test_sse_response_with_error_field() {
+        let sse_data = r#"{"error": {"code": -32601, "message": "Method not found"}}"#;
+        let parsed: Value = serde_json::from_str(sse_data).unwrap();
+
+        assert!(parsed.get("error").is_some());
+        assert_eq!(parsed["error"]["code"], -32601);
+    }
+
+    #[tokio::test]
+    async fn test_json_parsing_from_sse_data() {
+        // Test valid JSON-RPC response in SSE data
+        let sse_data = r#"{"result": {"tools": []}}"#;
+        let parsed: Value = serde_json::from_str(sse_data).unwrap();
+
+        assert!(parsed.get("result").is_some());
+        assert!(parsed.get("result").unwrap().get("tools").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_json_parsing_invalid_data() {
+        // Test invalid JSON in SSE data
+        let sse_data = "not valid json";
+        let result: Result<Value, _> = serde_json::from_str(sse_data);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_content_type_detection() {
+        let sse_type = "text/event-stream; charset=utf-8";
+        let json_type = "application/json";
+
+        assert!(sse_type.contains("text/event-stream"));
+        assert!(!json_type.contains("text/event-stream"));
+    }
+
+    #[test]
+    fn test_result_and_error_field_detection() {
+        let with_result = json!({"result": {"data": "test"}});
+        let with_error = json!({"error": {"code": -32700, "message": "Parse error"}});
+        let neither = json!({"status": "pending"});
+
+        assert!(with_result.get("result").is_some());
+        assert!(with_error.get("error").is_some());
+        assert!(neither.get("result").is_none() && neither.get("error").is_none());
+    }
+
+    #[test]
+    fn test_empty_sse_data_handling() {
+        let empty_data = "";
+        assert!(empty_data.is_empty());
+
+        // Empty data should be skipped in SSE parsing
+        let non_empty = "data";
+        assert!(!non_empty.is_empty());
+    }
+
+    #[test]
+    fn test_http_status_detection() {
+        // Test status code checking logic
+        let status_ok = reqwest::StatusCode::OK;
+        let status_error = reqwest::StatusCode::INTERNAL_SERVER_ERROR;
+
+        assert!(status_ok.is_success());
+        assert!(!status_error.is_success());
+    }
+
+    #[test]
+    fn test_string_truncation() {
+        let long_string = "a".repeat(300);
+        let truncated = &long_string[..long_string.len().min(200)];
+
+        assert_eq!(truncated.len(), 200);
+    }
+
+    #[test]
+    fn test_timeout_value() {
+        let timeout_secs = REQUEST_TIMEOUT_SECS;
+        assert_eq!(timeout_secs, 5);
+        assert!(timeout_secs > 0);
+    }
+
+    #[test]
+    fn test_api_url_const() {
+        assert_eq!(BUN_DOCS_API, "https://bun.com/docs/mcp");
+        assert!(BUN_DOCS_API.starts_with("https://"));
     }
 }

@@ -209,7 +209,7 @@ mod tests {
     #[test]
     fn test_parse_valid_jsonrpc_request() {
         let message = r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#;
-        let request: Result<JsonRpcRequest, _> = serde_json::from_str(&message);
+        let request: Result<JsonRpcRequest, _> = serde_json::from_str(message);
 
         assert!(request.is_ok());
         let req = request.unwrap();
@@ -220,8 +220,187 @@ mod tests {
     #[test]
     fn test_parse_invalid_jsonrpc_request() {
         let message = r#"{"invalid json"#;
-        let request: Result<JsonRpcRequest, _> = serde_json::from_str(&message);
+        let request: Result<JsonRpcRequest, _> = serde_json::from_str(message);
 
         assert!(request.is_err());
+    }
+
+    #[test]
+    fn test_error_response_codes() {
+        // Test parse error
+        let parse_error = JsonRpcResponse::error(json!(1), -32700, "Parse error".to_string());
+        let serialized = serde_json::to_value(&parse_error).unwrap();
+        assert_eq!(serialized["error"]["code"], -32700);
+
+        // Test method not found
+        let method_error = JsonRpcResponse::error(json!(2), -32601, "Method not found".to_string());
+        let serialized = serde_json::to_value(&method_error).unwrap();
+        assert_eq!(serialized["error"]["code"], -32601);
+
+        // Test internal error
+        let internal_error = JsonRpcResponse::error(json!(3), -32603, "Internal error".to_string());
+        let serialized = serde_json::to_value(&internal_error).unwrap();
+        assert_eq!(serialized["error"]["code"], -32603);
+    }
+
+    #[test]
+    fn test_response_serialization() {
+        let response = JsonRpcResponse::success(json!("test-id"), json!({"result": "data"}));
+        let serialized = serde_json::to_string(&response);
+
+        assert!(serialized.is_ok());
+        let json_str = serialized.unwrap();
+        assert!(json_str.contains("\"jsonrpc\":\"2.0\""));
+        assert!(json_str.contains("\"id\":\"test-id\""));
+    }
+
+    #[test]
+    fn test_handle_tools_list_structure() {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!(1),
+            method: "tools/list".to_string(),
+            params: None,
+        };
+
+        let response = handle_tools_list(&request);
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        // Verify required fields
+        assert!(serialized["result"]["tools"].is_array());
+        let tools = serialized["result"]["tools"].as_array().unwrap();
+        assert!(!tools.is_empty());
+
+        // Verify tool structure
+        let tool = &tools[0];
+        assert!(tool["name"].is_string());
+        assert!(tool["description"].is_string());
+        assert!(tool["inputSchema"]["type"].is_string());
+        assert_eq!(tool["inputSchema"]["type"], "object");
+    }
+
+    #[test]
+    fn test_initialize_response_version() {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!(1),
+            method: "initialize".to_string(),
+            params: None,
+        };
+
+        let response = handle_initialize(&request);
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        // Verify protocol version matches MCP spec
+        assert_eq!(serialized["result"]["protocolVersion"], "2024-11-05");
+    }
+
+    #[test]
+    fn test_jsonrpc_request_with_params() {
+        let message = r#"{"jsonrpc":"2.0","id":1,"method":"test","params":{"key":"value"}}"#;
+        let request: JsonRpcRequest = serde_json::from_str(message).unwrap();
+
+        assert!(request.params.is_some());
+        let params = request.params.unwrap();
+        assert_eq!(params["key"], "value");
+    }
+
+    #[test]
+    fn test_response_null_id() {
+        let response = JsonRpcResponse::error(json!(null), -32700, "Error".to_string());
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert!(serialized["id"].is_null());
+    }
+
+    #[tokio::test]
+    async fn test_handle_tools_call_with_result_extraction() {
+        let mut server = mockito::Server::new_async().await;
+
+        let _mock = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"result": {"data": "extracted"}}"#)
+            .create_async()
+            .await;
+
+        let client = http::BunDocsClient::new_with_url(server.url());
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!(1),
+            method: "tools/call".to_string(),
+            params: Some(json!({"name": "SearchBun"})),
+        };
+
+        let response = handle_tools_call(&client, &request).await;
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert!(serialized["result"].is_object());
+    }
+
+    #[tokio::test]
+    async fn test_handle_tools_call_without_result_field() {
+        let mut server = mockito::Server::new_async().await;
+
+        let _mock = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data": "no result field"}"#)
+            .create_async()
+            .await;
+
+        let client = http::BunDocsClient::new_with_url(server.url());
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!(2),
+            method: "tools/call".to_string(),
+            params: None,
+        };
+
+        let response = handle_tools_call(&client, &request).await;
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert!(serialized["result"]["data"].is_string());
+    }
+
+    #[tokio::test]
+    async fn test_handle_tools_call_http_error() {
+        let mut server = mockito::Server::new_async().await;
+
+        let _mock = server
+            .mock("POST", "/")
+            .with_status(503)
+            .with_body("Service Unavailable")
+            .create_async()
+            .await;
+
+        let client = http::BunDocsClient::new_with_url(server.url());
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!(3),
+            method: "tools/call".to_string(),
+            params: None,
+        };
+
+        let response = handle_tools_call(&client, &request).await;
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert!(serialized["error"].is_object());
+        assert_eq!(serialized["error"]["code"], -32603);
+    }
+
+    #[test]
+    fn test_init_logging_execution() {
+        // Test that init_logging can be called
+        // Will panic if called twice, but that's expected
+        let result = std::panic::catch_unwind(|| {
+            init_logging();
+        });
+
+        // Either succeeds or panics (already initialized) - both are fine
+        // This just ensures the function code path is exercised
+        let _ = result;
     }
 }

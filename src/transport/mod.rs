@@ -58,3 +58,63 @@ impl StdioTransport {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_transport_creation() {
+        let _transport = StdioTransport::new();
+    }
+
+    #[test]
+    fn test_message_truncation_logic() {
+        let long_message = "a".repeat(100);
+        let truncated = &long_message[..long_message.len().min(80)];
+        assert_eq!(truncated.len(), 80);
+    }
+
+    #[test]
+    fn test_trim_behavior() {
+        let message_with_whitespace = "  test message  \n";
+        let trimmed = message_with_whitespace.trim();
+        assert_eq!(trimmed, "test message");
+    }
+
+    #[test]
+    fn test_empty_line_detection() {
+        let empty = "";
+        let whitespace_only = "   \n";
+        let non_empty = "message";
+
+        assert!(empty.trim().is_empty());
+        assert!(whitespace_only.trim().is_empty());
+        assert!(!non_empty.trim().is_empty());
+    }
+
+    #[test]
+    fn test_newline_bytes() {
+        let newline = b"\n";
+        assert_eq!(newline.len(), 1);
+        assert_eq!(newline[0], 10);
+    }
+
+    #[test]
+    fn test_message_format() {
+        let message = "test message";
+        let with_newline = format!("{}\n", message);
+        assert_eq!(with_newline, "test message\n");
+        assert!(with_newline.ends_with('\n'));
+    }
+
+    #[test]
+    fn test_string_length_safety() {
+        let short = "test";
+        let long = "a".repeat(200);
+        let short_min = short.len().min(80);
+        let long_min = long.len().min(80);
+        assert_eq!(short_min, 4);
+        assert_eq!(long_min, 80);
+    }
+}

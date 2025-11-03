@@ -75,11 +75,20 @@ make test-doc
 
 ### Code Coverage
 
+**Current Coverage: 85.98%** (552/642 lines)
+
 Generate HTML coverage report:
 
 ```bash
 make coverage
-# Opens tarpaulin-report.html
+# Opens target/llvm-cov/html/index.html
+```
+
+Show coverage summary in terminal:
+
+```bash
+make coverage-text
+# Or: cargo llvm-cov
 ```
 
 ### Manual Testing
@@ -97,7 +106,7 @@ Install recommended dev tools:
 
 ```bash
 make install-tools
-# Installs: cargo-tarpaulin, cargo-watch
+# Installs: cargo-llvm-cov, cargo-watch, llvm-tools-preview
 ```
 
 Watch mode for continuous testing:

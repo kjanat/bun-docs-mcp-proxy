@@ -44,9 +44,6 @@ jobs:
       - name: Run unit tests
         run: cargo test --verbose
 
-      - name: Run doc tests
-        run: cargo test --doc --verbose
-
       - name: Install test dependencies
         run: sudo apt-get update && sudo apt-get install -y jq
 
@@ -64,18 +61,20 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
 
-      - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
 
       - name: Generate coverage
-        run: cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out xml
+        run: cargo llvm-cov --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
           slug: kjanat/bun-docs-mcp-proxy
-          files: ./cobertura.xml
+          files: ./lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
 
   fmt:
