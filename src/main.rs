@@ -590,6 +590,157 @@ mod tests {
         assert_eq!(serialized["error"]["code"], -32603);
     }
 
+    #[tokio::test]
+    async fn test_handle_resources_read_with_query() {
+        let mut server = mockito::Server::new_async().await;
+
+        let _mock = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"result": {"data": "bun serve docs"}}"#)
+            .create_async()
+            .await;
+
+        let client = http::BunDocsClient::new_with_url(server.url());
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!("res1"),
+            method: "resources/read".to_string(),
+            params: Some(json!({"uri": "bun://docs?query=Bun.serve"})),
+        };
+
+        let response = handle_resources_read(&client, &request).await;
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert!(serialized["result"]["contents"].is_array());
+        let contents = serialized["result"]["contents"].as_array().unwrap();
+        assert_eq!(contents.len(), 1);
+        assert_eq!(contents[0]["uri"], "bun://docs?query=Bun.serve");
+        assert_eq!(contents[0]["mimeType"], "application/json");
+    }
+
+    #[tokio::test]
+    async fn test_handle_resources_read_empty_query() {
+        let mut server = mockito::Server::new_async().await;
+
+        let _mock = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"result": {"data": "overview"}}"#)
+            .create_async()
+            .await;
+
+        let client = http::BunDocsClient::new_with_url(server.url());
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!("res2"),
+            method: "resources/read".to_string(),
+            params: Some(json!({"uri": "bun://docs"})),
+        };
+
+        let response = handle_resources_read(&client, &request).await;
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert!(serialized["result"]["contents"].is_array());
+    }
+
+    #[tokio::test]
+    async fn test_handle_resources_read_missing_params() {
+        let client = http::BunDocsClient::new();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!("res3"),
+            method: "resources/read".to_string(),
+            params: None,
+        };
+
+        let response = handle_resources_read(&client, &request).await;
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert!(serialized["error"].is_object());
+        assert_eq!(serialized["error"]["code"], -32602);
+        assert!(
+            serialized["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Missing params")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_resources_read_invalid_uri() {
+        let client = http::BunDocsClient::new();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!("res4"),
+            method: "resources/read".to_string(),
+            params: Some(json!({"uri": "invalid://uri"})),
+        };
+
+        let response = handle_resources_read(&client, &request).await;
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert!(serialized["error"].is_object());
+        assert_eq!(serialized["error"]["code"], -32602);
+        assert!(
+            serialized["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Invalid URI format")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_resources_read_missing_uri_param() {
+        let client = http::BunDocsClient::new();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!("res5"),
+            method: "resources/read".to_string(),
+            params: Some(json!({"other": "value"})),
+        };
+
+        let response = handle_resources_read(&client, &request).await;
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert!(serialized["error"].is_object());
+        assert_eq!(serialized["error"]["code"], -32602);
+        assert!(
+            serialized["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Missing or invalid uri parameter")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_resources_read_http_error() {
+        let mut server = mockito::Server::new_async().await;
+
+        let _mock = server
+            .mock("POST", "/")
+            .with_status(500)
+            .with_body("Internal Server Error")
+            .create_async()
+            .await;
+
+        let client = http::BunDocsClient::new_with_url(server.url());
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!("res6"),
+            method: "resources/read".to_string(),
+            params: Some(json!({"uri": "bun://docs?query=test"})),
+        };
+
+        let response = handle_resources_read(&client, &request).await;
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert!(serialized["error"].is_object());
+        assert_eq!(serialized["error"]["code"], -32603);
+    }
+
     #[test]
     fn test_init_logging_execution() {
         // Test that init_logging can be called
