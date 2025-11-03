@@ -1,0 +1,216 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform.target }}
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          # Linux x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            cross: false
+            name: linux-x86_64
+
+          # Linux ARM64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            cross: true
+            name: linux-aarch64
+
+          # Linux x86_64 musl (static)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            cross: true
+            name: linux-x86_64-musl
+
+          # Linux ARM64 musl (static)
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            cross: true
+            name: linux-aarch64-musl
+
+          # macOS x86_64 (Intel)
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            cross: false
+            name: macos-x86_64
+
+          # macOS ARM64 (Apple Silicon)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            cross: false
+            name: macos-aarch64
+
+          # Windows x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            cross: false
+            name: windows-x86_64
+
+          # Windows ARM64
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            cross: false
+            name: windows-aarch64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.target }}
+
+      - name: Install cross
+        if: matrix.platform.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build with cross
+        if: matrix.platform.cross
+        run: cross build --release --target ${{ matrix.platform.target }}
+
+      - name: Build native
+        if: ${{ !matrix.platform.cross }}
+        run: cargo build --release --target ${{ matrix.platform.target }}
+
+      - name: Package (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          cd target/${{ matrix.platform.target }}/release
+          tar czf bun-docs-mcp-proxy-${{ matrix.platform.name }}.tar.gz bun-docs-mcp-proxy
+          sha256sum bun-docs-mcp-proxy-${{ matrix.platform.name }}.tar.gz > bun-docs-mcp-proxy-${{ matrix.platform.name }}.tar.gz.sha256
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd target/${{ matrix.platform.target }}/release
+          7z a bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip bun-docs-mcp-proxy.exe
+          certutil -hashfile bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip SHA256 > bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip.sha256
+
+      - name: Upload artifact (Linux/macOS)
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bun-docs-mcp-proxy-${{ matrix.platform.name }}
+          path: |
+            target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.tar.gz
+            target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.tar.gz.sha256
+
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bun-docs-mcp-proxy-${{ matrix.platform.name }}
+          path: |
+            target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip
+            target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip.sha256
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Extract version from tag
+          VERSION=${GITHUB_REF#refs/tags/}
+
+          # Create release notes
+          cat > release_notes.md << 'EOF'
+          ## Bun Docs MCP Proxy ${{ github.ref_name }}
+
+          ### Installation
+
+          Download the binary for your platform below, extract it, and make it executable (Linux/macOS).
+
+          #### Linux/macOS
+          ```bash
+          # Download and extract (adjust URL for your platform)
+          curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/bun-docs-mcp-proxy-linux-x86_64.tar.gz | tar xz
+
+          # Make executable
+          chmod +x bun-docs-mcp-proxy
+
+          # Move to PATH (optional)
+          sudo mv bun-docs-mcp-proxy /usr/local/bin/
+          ```
+
+          #### Windows
+          Download the `.zip` file, extract it, and add to your PATH.
+
+          ### Platforms
+
+          - **Linux x86_64**: `bun-docs-mcp-proxy-linux-x86_64.tar.gz`
+          - **Linux ARM64**: `bun-docs-mcp-proxy-linux-aarch64.tar.gz`
+          - **Linux x86_64 musl** (static): `bun-docs-mcp-proxy-linux-x86_64-musl.tar.gz`
+          - **Linux ARM64 musl** (static): `bun-docs-mcp-proxy-linux-aarch64-musl.tar.gz`
+          - **macOS Intel**: `bun-docs-mcp-proxy-macos-x86_64.tar.gz`
+          - **macOS Apple Silicon**: `bun-docs-mcp-proxy-macos-aarch64.tar.gz`
+          - **Windows x86_64**: `bun-docs-mcp-proxy-windows-x86_64.zip`
+          - **Windows ARM64**: `bun-docs-mcp-proxy-windows-aarch64.zip`
+
+          ### Verification
+
+          SHA256 checksums are provided for each binary. Verify with:
+
+          ```bash
+          # Linux/macOS
+          sha256sum -c bun-docs-mcp-proxy-*.sha256
+
+          # Windows (PowerShell)
+          Get-FileHash bun-docs-mcp-proxy-*.zip -Algorithm SHA256
+          ```
+          EOF
+
+          # Create release
+          gh release create "${VERSION}" \
+            --title "Release ${VERSION}" \
+            --notes-file release_notes.md \
+            artifacts/*/*.tar.gz \
+            artifacts/*/*.tar.gz.sha256 \
+            artifacts/*/*.zip \
+            artifacts/*/*.zip.sha256

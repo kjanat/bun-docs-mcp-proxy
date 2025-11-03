@@ -130,7 +130,7 @@ Searches Bun documentation.
 ## Dependencies
 
 | Crate                  | Purpose            | Features Used                            |
-|------------------------|--------------------|------------------------------------------|
+| ---------------------- | ------------------ | ---------------------------------------- |
 | **tokio**              | Async runtime      | rt-multi-thread, io-std, io-util, macros |
 | **reqwest**            | HTTP client        | json, stream, rustls-tls                 |
 | **eventsource-stream** | SSE parsing        | (default)                                |
@@ -144,8 +144,8 @@ Searches Bun documentation.
 
 **Measured on Linux x86_64 (Manjaro 6.16.12)**:
 
-| Metric       | Value   | Target  | Status           |
-|--------------|---------|---------|------------------|
+| Metric       | Value   | Target  | Status            |
+| ------------ | ------- | ------- | ----------------- |
 | Binary Size  | 2.7 MB  | < 5 MB  | ✅ **46% under**  |
 | Startup Time | 4 ms    | < 10 ms | ✅ **60% faster** |
 | Memory Usage | ~2-5 MB | < 10 MB | ✅ Within target  |
@@ -154,18 +154,18 @@ Searches Bun documentation.
 ### Comparison with TypeScript Proxy
 
 | Metric       | TypeScript (Bun)        | Rust Native | Improvement       |
-|--------------|-------------------------|-------------|-------------------|
+| ------------ | ----------------------- | ----------- | ----------------- |
 | Binary Size  | ~50 MB (Bun runtime)    | 2.7 MB      | **95% smaller**   |
 | Startup Time | ~100-200 ms             | 4 ms        | **25-50x faster** |
 | Memory Usage | ~30-50 MB               | ~2-5 MB     | **10x less**      |
-| Runtime Deps | Bun or Node.js required | None        | ✅ Standalone      |
+| Runtime Deps | Bun or Node.js required | None        | ✅ Standalone     |
 
 ## Error Handling
 
 The proxy handles errors gracefully and returns proper JSON-RPC error responses:
 
 | Error Code | Meaning          | When                      |
-|------------|------------------|---------------------------|
+| ---------- | ---------------- | ------------------------- |
 | `-32700`   | Parse error      | Invalid JSON              |
 | `-32601`   | Method not found | Unknown method            |
 | `-32603`   | Internal error   | HTTP failures, SSE errors |

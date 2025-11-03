@@ -278,5 +278,6 @@ zsdoc/data
 extension.wasm
 
 .idea/
+.serena/
 
 bin/
