@@ -51,7 +51,7 @@ ENVIRONMENT VARIABLES:
     RUST_LOG         Set logging level (debug, info, warn, error)
 
 EXAMPLES:
-    # Start the proxy (typically called by MCP client)
+    # Start the proxy (typically called by an MCP client)
     {}
 
     # Start with debug logging
@@ -94,7 +94,7 @@ fn handle_args(args: &[String]) -> bool {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Handle command-line arguments before starting proxy
+    // Handle command-line arguments before starting the proxy
     let args: Vec<String> = std::env::args().collect();
     if handle_args(&args) {
         return Ok(());
