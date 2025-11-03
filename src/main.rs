@@ -17,8 +17,88 @@ fn init_logging() {
         .init();
 }
 
+fn print_version() {
+    println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+}
+
+fn print_help() {
+    println!(
+        "{} {} - {}
+
+USAGE:
+    {} [FLAGS]
+
+FLAGS:
+    -h, --help       Print help information
+    -V, --version    Print version information
+
+DESCRIPTION:
+    MCP (Model Context Protocol) proxy for Bun documentation search.
+
+    Acts as a protocol adapter that receives JSON-RPC 2.0 requests over stdin,
+    forwards them to the Bun documentation HTTP API at https://bun.com/docs/mcp,
+    parses SSE (Server-Sent Events) responses, and returns JSON-RPC responses
+    over stdout.
+
+SUPPORTED METHODS:
+    initialize       Initialize the MCP connection
+    tools/list       List available tools (SearchBun)
+    tools/call       Call a tool with parameters
+
+ENVIRONMENT VARIABLES:
+    RUST_LOG         Set logging level (debug, info, warn, error)
+
+EXAMPLES:
+    # Start the proxy (typically called by MCP client)
+    {}
+
+    # Start with debug logging
+    RUST_LOG=debug {}
+
+    # Test tools/call method
+    echo '{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{{\"name\":\"SearchBun\",\"arguments\":{{\"query\":\"Bun.serve\"}}}}}}' | {}",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
+        env!("CARGO_PKG_DESCRIPTION"),
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_NAME")
+    );
+}
+
+fn handle_args() -> bool {
+    let args: Vec<String> = std::env::args().collect();
+
+    // Check for flags (skip first arg which is program name)
+    for arg in args.iter().skip(1) {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                print_help();
+                return true;
+            }
+            "-V" | "--version" => {
+                print_version();
+                return true;
+            }
+            _ => {
+                eprintln!("Unknown argument: {}", arg);
+                eprintln!("Use --help for usage information");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    false
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Handle command-line arguments before starting proxy
+    if handle_args() {
+        return Ok(());
+    }
+
     init_logging();
     info!("Bun Docs MCP Proxy starting");
 
@@ -402,5 +482,32 @@ mod tests {
         // Either succeeds or panics (already initialized) - both are fine
         // This just ensures the function code path is exercised
         let _ = result;
+    }
+
+    #[test]
+    fn test_print_version() {
+        // Test that print_version doesn't panic
+        // Can't easily test output without mocking stdout
+        let result = std::panic::catch_unwind(|| {
+            print_version();
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_print_help() {
+        // Test that print_help doesn't panic
+        let result = std::panic::catch_unwind(|| {
+            print_help();
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_args_no_args() {
+        // Test with no args (simulate program name only)
+        // Note: In actual execution, there's always at least the program name
+        let result = handle_args();
+        assert!(!result); // Should return false when no flags present
     }
 }
