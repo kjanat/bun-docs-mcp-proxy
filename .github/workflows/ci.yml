@@ -75,6 +75,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           slug: kjanat/bun-docs-mcp-proxy
+          files: ./cobertura.xml
           token: ${{ secrets.CODECOV_TOKEN }}
 
   fmt:

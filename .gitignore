@@ -281,3 +281,7 @@ extension.wasm
 .serena/
 
 bin/
+
+tarpaulin-report.html
+
+cobertura.xml
