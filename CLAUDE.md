@@ -84,16 +84,16 @@ cargo build --release --target x86_64-pc-windows-msvc
 
 ## Testing
 
-**Test Coverage: 85.98%** (552/642 lines)
+**Test Coverage: X%** (X/X lines)
 
 ### Test Suite (46 tests)
 
 **Unit Tests** (41 tests):
 
-- `src/protocol/mod.rs` - JSON-RPC serialization/deserialization (100% coverage)
-- `src/http/mod.rs` - HTTP client, SSE parsing, mocked API tests (95.45% coverage)
-- `src/transport/mod.rs` - Stdio transport logic (56.10% coverage)
-- `src/main.rs` - Handler functions, error paths (84.00% coverage)
+- `src/protocol/mod.rs` - JSON-RPC serialization/deserialization
+- `src/http/mod.rs` - HTTP client, SSE parsing, mocked API tests
+- `src/transport/mod.rs` - Stdio transport logic
+- `src/main.rs` - Handler functions, error paths
 
 **Integration Tests** (5 tests):
 
