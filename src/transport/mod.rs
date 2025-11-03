@@ -27,9 +27,21 @@ impl StdioTransport {
         }
     }
 
-    /// Truncate message for debug logging
+    /// Truncate message for debug logging, preserving UTF-8 boundaries
     fn truncate_for_debug(message: &str) -> &str {
-        &message[..message.len().min(DEBUG_MESSAGE_MAX_LEN)]
+        if message.len() <= DEBUG_MESSAGE_MAX_LEN {
+            return message;
+        }
+        // Find the last char whose end position is at or before max length
+        let mut last_valid = 0;
+        for (idx, ch) in message.char_indices() {
+            let end_pos = idx + ch.len_utf8();
+            if end_pos > DEBUG_MESSAGE_MAX_LEN {
+                break;
+            }
+            last_valid = end_pos;
+        }
+        &message[..last_valid]
     }
 
     pub async fn read_message(&mut self) -> Result<Option<String>> {

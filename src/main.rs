@@ -792,7 +792,7 @@ mod tests {
     #[test]
     fn test_get_string_param() {
         let params = json!({"uri": "bun://docs", "other": 123});
-        
+
         assert_eq!(get_string_param(&params, "uri").unwrap(), "bun://docs");
         assert!(get_string_param(&params, "other").is_err());
         assert!(get_string_param(&params, "missing").is_err());

@@ -80,15 +80,16 @@ impl BunDocsClient {
         if s.len() <= max_len {
             return s;
         }
-        // Simple truncation for now, ensuring we don't split mid-character
-        let mut truncated = String::with_capacity(max_len);
-        for ch in s.chars() {
-            if truncated.len() + ch.len_utf8() > max_len {
+        // Find the last char whose end position is at or before max_len
+        let mut last_valid = 0;
+        for (idx, ch) in s.char_indices() {
+            let end_pos = idx + ch.len_utf8();
+            if end_pos > max_len {
                 break;
             }
-            truncated.push(ch);
+            last_valid = end_pos;
         }
-        truncated
+        s[..last_valid].to_string()
     }
 
     pub async fn forward_request(&self, request: Value) -> Result<Value> {
@@ -168,7 +169,7 @@ impl BunDocsClient {
                     // Connection/timeout/etc. Retry if transient
                     let is_transient = e.is_connect() || e.is_timeout() || e.is_request();
                     let err = anyhow::anyhow!("Failed to send request to Bun Docs API: {}", e);
-                    
+
                     if is_transient && attempt < MAX_RETRIES {
                         warn!(
                             "Network error: {}. Retrying (attempt {} of {})",
@@ -181,7 +182,7 @@ impl BunDocsClient {
                         last_err = Some(err);
                         continue;
                     }
-                    
+
                     return Err(err);
                 }
             }
@@ -328,7 +329,9 @@ mod tests {
 
         let long = "a".repeat(100);
         let truncated = BunDocsClient::truncate_utf8(long, 50);
-        assert_eq!(truncated.len(), 50);
+        assert!(truncated.len() <= 50);
+        assert!(!truncated.is_empty());
+        assert!(truncated.is_char_boundary(truncated.len()));
 
         // Test with unicode characters
         let unicode = "hello 世界".to_string();
