@@ -1,37 +1,130 @@
+//! HTTP client for the Bun Docs API with SSE support and automatic retries.
+//!
+//! This module provides a robust HTTP client that:
+//! - Forwards JSON-RPC requests to the Bun Docs API at `https://bun.com/docs/mcp`
+//! - Parses Server-Sent Events (SSE) responses from the API
+//! - Implements automatic retry logic with exponential backoff for transient failures
+//! - Provides testability via `with_base_url()` constructor for mock servers
+//!
+//! ## SSE Protocol Behavior
+//!
+//! The Bun Docs API may return responses as SSE (Server-Sent Events) or plain JSON,
+//! depending on the content-type header. When parsing SSE streams:
+//! - Only "message" and "completion" event types are processed
+//! - Heartbeat and other event types are ignored
+//! - **Important**: This implementation expects a complete JSON-RPC object in a single
+//!   SSE event. If the server streams partial deltas across multiple events, this
+//!   implementation will not accumulate them. Adjust `parse_sse_response()` if the
+//!   protocol changes to delta streaming.
+//!
+//! ## Retry Strategy
+//!
+//! Transient failures (network errors, 429, 5xx status codes) are retried up to
+//! [`MAX_RETRIES`] times with exponential backoff (200 ms → 400 ms → 800 ms, capped at 1 s).
+
 use anyhow::{Context, Result};
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
-use reqwest::{Client, StatusCode, Url};
+use reqwest::{Client, StatusCode, Url, header::HeaderMap};
 use serde_json::Value;
+use std::time::Duration;
 use tracing::{debug, info, warn};
 
 const BUN_DOCS_API: &str = "https://bun.com/docs/mcp";
 const REQUEST_TIMEOUT_SECS: u64 = 5;
+const MAX_RETRIES: usize = 3;
 
 pub struct BunDocsClient {
     client: Client,
     base_url: Url,
 }
 
+impl Default for BunDocsClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BunDocsClient {
     pub fn new() -> Self {
-        Self {
+        Self::with_base_url(BUN_DOCS_API).expect("valid base URL")
+    }
+
+    pub fn with_base_url(url: &str) -> Result<Self> {
+        Ok(Self {
             client: Client::new(),
-            base_url: Url::parse(BUN_DOCS_API).expect("valid base URL"),
+            base_url: Url::parse(url).context("Invalid base URL")?,
+        })
+    }
+
+    /// Compute exponential backoff delay without external dependencies
+    ///
+    /// # Arguments
+    /// * `attempt` - Attempt number (must be >= 1)
+    ///
+    /// # Returns
+    /// Delay in milliseconds: 200 ms, 400 ms, 800 ms (capped at 1000 ms)
+    fn backoff_delay_ms(attempt: usize) -> u64 {
+        debug_assert!(attempt > 0, "attempt must be >= 1");
+        // 200ms, 400ms, 800ms (cap at 1000ms)
+        let base = 200u64.saturating_mul(1u64 << (attempt.saturating_sub(1) as u32));
+        base.min(1000)
+    }
+
+    /// Check if HTTP status code indicates a transient error worth retrying
+    fn is_transient_status(status: StatusCode) -> bool {
+        matches!(
+            status,
+            StatusCode::TOO_MANY_REQUESTS
+                | StatusCode::INTERNAL_SERVER_ERROR
+                | StatusCode::BAD_GATEWAY
+                | StatusCode::SERVICE_UNAVAILABLE
+                | StatusCode::GATEWAY_TIMEOUT
+        )
+    }
+
+    /// Extract main content type from header map
+    fn main_content_type(headers: &HeaderMap) -> String {
+        headers
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase()
+    }
+
+    /// Summarize headers for logging (first 8 headers)
+    fn summarize_headers(headers: &HeaderMap) -> String {
+        headers
+            .iter()
+            .take(8)
+            .map(|(k, v)| format!("{}: {}", k.as_str(), v.to_str().unwrap_or("<binary>")))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// Truncate string to max length, preserving UTF-8 boundaries
+    fn truncate_utf8(s: String, max_len: usize) -> String {
+        if s.len() <= max_len {
+            return s;
         }
+        // Find the last char whose end position is at or before max_len
+        let mut last_valid = 0;
+        for (idx, ch) in s.char_indices() {
+            let end_pos = idx + ch.len_utf8();
+            if end_pos > max_len {
+                break;
+            }
+            last_valid = end_pos;
+        }
+        s[..last_valid].to_string()
     }
 
     pub async fn forward_request(&self, request: Value) -> Result<Value> {
         debug!("Forwarding request to Bun Docs API");
-
-        const MAX_RETRIES: usize = 3;
-
-        // Small helper to compute exponential backoff without external deps
-        fn backoff_delay_ms(attempt: usize) -> u64 {
-            // 200ms, 400ms, 800ms (cap at 1000ms)
-            let base = 200u64.saturating_mul(1u64 << (attempt.saturating_sub(1) as u32));
-            base.min(1000)
-        }
 
         let mut last_err: Option<anyhow::Error> = None;
 
@@ -40,10 +133,13 @@ impl BunDocsClient {
             let rb = self
                 .client
                 .post(self.base_url.as_str())
-                .header("Content-Type", "application/json")
-                .header("Accept", "application/json, text/event-stream")
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .header(
+                    reqwest::header::ACCEPT,
+                    "application/json, text/event-stream",
+                )
                 .json(&request)
-                .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS));
+                .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS));
 
             return match rb.send().await {
                 Ok(response) => {
@@ -53,66 +149,37 @@ impl BunDocsClient {
                         status, attempt, MAX_RETRIES
                     );
 
-                    // Normalize content-type header early for both success and error paths
                     let headers = response.headers().clone();
-                    let content_type_raw = headers
-                        .get("content-type")
-                        .and_then(|v| v.to_str().ok())
-                        .unwrap_or("");
-                    let main_content_type = content_type_raw
-                        .split(';')
-                        .next()
-                        .unwrap_or("")
-                        .trim()
-                        .to_ascii_lowercase();
+                    let content_type = Self::main_content_type(&headers);
 
                     if !status.is_success() {
                         // Read body (truncated) for context
                         let bytes = response.bytes().await.unwrap_or_default();
-                        let mut body = String::from_utf8_lossy(&bytes).to_string();
-                        if body.len() > 2048 {
-                            body.truncate(2048);
-                        }
-
-                        // Build a small header summary (up to 8 headers)
-                        let header_summary = headers
-                            .iter()
-                            .take(8)
-                            .map(|(k, v)| {
-                                format!("{}: {}", k.as_str(), v.to_str().unwrap_or("<binary>"))
-                            })
-                            .collect::<Vec<_>>()
-                            .join(", ");
+                        let body = String::from_utf8_lossy(&bytes).to_string();
+                        let body_snippet = Self::truncate_utf8(body, 2048);
+                        let header_summary = Self::summarize_headers(&headers);
 
                         let err = anyhow::anyhow!(
                             "Bun Docs API error: status={} content_type={} headers=[{}] body_snippet=\"{}\"",
                             status,
-                            if main_content_type.is_empty() {
+                            if content_type.is_empty() {
                                 "<none>"
                             } else {
-                                &main_content_type
+                                &content_type
                             },
                             header_summary,
-                            body
+                            body_snippet
                         );
 
                         // Retry on transient server statuses
-                        if matches!(
-                            status,
-                            StatusCode::TOO_MANY_REQUESTS
-                                | StatusCode::INTERNAL_SERVER_ERROR
-                                | StatusCode::BAD_GATEWAY
-                                | StatusCode::SERVICE_UNAVAILABLE
-                                | StatusCode::GATEWAY_TIMEOUT
-                        ) && attempt < MAX_RETRIES
-                        {
+                        if Self::is_transient_status(status) && attempt < MAX_RETRIES {
                             warn!(
                                 "Transient HTTP status {}, retrying (attempt {})",
                                 status,
                                 attempt + 1
                             );
-                            let delay = backoff_delay_ms(attempt);
-                            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                            let delay = Self::backoff_delay_ms(attempt);
+                            tokio::time::sleep(Duration::from_millis(delay)).await;
                             last_err = Some(err);
                             continue;
                         }
@@ -120,8 +187,8 @@ impl BunDocsClient {
                         return Err(err);
                     }
 
-                    // Success: decide how to parse
-                    if main_content_type.starts_with("text/event-stream") {
+                    // Success: decide how to parse based on content type
+                    if content_type.starts_with("text/event-stream") {
                         debug!("Parsing SSE stream");
                         return self.parse_sse_response(response).await;
                     }
@@ -136,6 +203,7 @@ impl BunDocsClient {
                     // Connection/timeout/etc. Retry if transient
                     let is_transient = e.is_connect() || e.is_timeout() || e.is_request();
                     let err = anyhow::anyhow!("Failed to send request to Bun Docs API: {}", e);
+
                     if is_transient && attempt < MAX_RETRIES {
                         warn!(
                             "Network error: {}. Retrying (attempt {} of {})",
@@ -143,11 +211,12 @@ impl BunDocsClient {
                             attempt + 1,
                             MAX_RETRIES
                         );
-                        let delay = backoff_delay_ms(attempt);
-                        tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                        let delay = Self::backoff_delay_ms(attempt);
+                        tokio::time::sleep(Duration::from_millis(delay)).await;
                         last_err = Some(err);
                         continue;
                     }
+
                     Err(err)
                 }
             };
@@ -172,6 +241,7 @@ impl BunDocsClient {
                         event.event.as_str()
                     };
                     if ev_type != "message" && ev_type != "completion" {
+                        debug!("Skipping SSE event type: {}", ev_type);
                         continue;
                     }
 
@@ -217,6 +287,109 @@ mod tests {
     fn test_client_creation() {
         let client = BunDocsClient::new();
         assert_eq!(client.base_url.as_str(), BUN_DOCS_API);
+    }
+
+    #[test]
+    fn test_client_default() {
+        let client = BunDocsClient::default();
+        assert_eq!(client.base_url.as_str(), BUN_DOCS_API);
+    }
+
+    #[test]
+    fn test_client_with_base_url() {
+        let custom_url = "https://example.com/api";
+        let client = BunDocsClient::with_base_url(custom_url).unwrap();
+        assert_eq!(client.base_url.as_str(), custom_url);
+    }
+
+    #[test]
+    fn test_client_with_base_url_invalid() {
+        let result = BunDocsClient::with_base_url("not a valid url");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_backoff_delay_ms() {
+        assert_eq!(BunDocsClient::backoff_delay_ms(1), 200);
+        assert_eq!(BunDocsClient::backoff_delay_ms(2), 400);
+        assert_eq!(BunDocsClient::backoff_delay_ms(3), 800);
+        assert_eq!(BunDocsClient::backoff_delay_ms(4), 1000); // capped
+    }
+
+    #[test]
+    fn test_is_transient_status() {
+        assert!(BunDocsClient::is_transient_status(
+            StatusCode::TOO_MANY_REQUESTS
+        ));
+        assert!(BunDocsClient::is_transient_status(
+            StatusCode::INTERNAL_SERVER_ERROR
+        ));
+        assert!(BunDocsClient::is_transient_status(StatusCode::BAD_GATEWAY));
+        assert!(BunDocsClient::is_transient_status(
+            StatusCode::SERVICE_UNAVAILABLE
+        ));
+        assert!(BunDocsClient::is_transient_status(
+            StatusCode::GATEWAY_TIMEOUT
+        ));
+        assert!(!BunDocsClient::is_transient_status(StatusCode::NOT_FOUND));
+        assert!(!BunDocsClient::is_transient_status(StatusCode::BAD_REQUEST));
+    }
+
+    #[test]
+    fn test_main_content_type() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            "application/json; charset=utf-8".parse().unwrap(),
+        );
+        assert_eq!(
+            BunDocsClient::main_content_type(&headers),
+            "application/json"
+        );
+
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            "text/event-stream".parse().unwrap(),
+        );
+        assert_eq!(
+            BunDocsClient::main_content_type(&headers),
+            "text/event-stream"
+        );
+
+        let empty_headers = HeaderMap::new();
+        assert_eq!(BunDocsClient::main_content_type(&empty_headers), "");
+    }
+
+    #[test]
+    fn test_summarize_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            "application/json".parse().unwrap(),
+        );
+        headers.insert(reqwest::header::CONTENT_LENGTH, "123".parse().unwrap());
+
+        let summary = BunDocsClient::summarize_headers(&headers);
+        assert!(summary.contains("content-type"));
+        assert!(summary.contains("application/json"));
+    }
+
+    #[test]
+    fn test_truncate_utf8() {
+        let short = "hello".to_string();
+        assert_eq!(BunDocsClient::truncate_utf8(short.clone(), 10), short);
+
+        let long = "a".repeat(100);
+        let truncated = BunDocsClient::truncate_utf8(long, 50);
+        assert!(truncated.len() <= 50);
+        assert!(!truncated.is_empty());
+        assert!(truncated.is_char_boundary(truncated.len()));
+
+        // Test with Unicode characters
+        let unicode = "hello 世界".to_string();
+        let truncated = BunDocsClient::truncate_utf8(unicode.clone(), 8);
+        assert!(truncated.len() <= 8);
+        assert!(truncated.is_char_boundary(truncated.len()));
     }
 
     #[tokio::test]

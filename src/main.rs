@@ -1,3 +1,29 @@
+//! Bun Docs MCP Proxy - Protocol adapter for Bun documentation search
+//!
+//! This proxy acts as a bridge between stdio-based MCP (Model Context Protocol) clients
+//! (like Zed editor) and the HTTP/SSE-based Bun documentation server at `https://bun.com/docs/mcp`.
+//!
+//! ## Request Flow
+//!
+//! ```text
+//! stdin (JSON-RPC) → Proxy → HTTP POST → bun.com/docs/mcp → SSE stream → parse → stdout (JSON-RPC)
+//! ```
+//!
+//! ## Supported JSON-RPC Methods
+//!
+//! - `initialize` - Initialize MCP connection, returns protocol version and capabilities
+//! - `tools/list` - List available tools (returns SearchBun tool)
+//! - `tools/call` - Execute a tool with parameters (forwarded to Bun Docs API)
+//! - `resources/list` - List available resources (returns Bun Documentation resource)
+//! - `resources/read` - Read a resource by URI (e.g., `bun://docs?query=Bun.serve`)
+//!
+//! ## Architecture
+//!
+//! The proxy consists of three main modules:
+//! - [`http`] - HTTP client with SSE parsing and retry logic
+//! - [`protocol`] - JSON-RPC 2.0 types and serialization
+//! - [`transport`] - Stdio transport layer for reading/writing messages
+
 mod http;
 mod protocol;
 mod transport;
@@ -6,6 +32,31 @@ use anyhow::Result;
 use protocol::{JsonRpcRequest, JsonRpcResponse};
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
+
+// JSON-RPC error codes
+const JSONRPC_PARSE_ERROR: i32 = -32700;
+const JSONRPC_INVALID_PARAMS: i32 = -32602;
+const JSONRPC_INTERNAL_ERROR: i32 = -32603;
+const JSONRPC_METHOD_NOT_FOUND: i32 = -32601;
+
+/// Extract a required string parameter from JSON-RPC params
+fn get_string_param<'a>(params: &'a serde_json::Value, key: &str) -> Result<&'a str, String> {
+    params
+        .get(key)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("Missing or invalid {} parameter", key))
+}
+
+/// Parse a Bun docs URI and extract the search query
+fn parse_bun_docs_uri(uri: &str) -> Result<String, String> {
+    if let Some(query_part) = uri.strip_prefix("bun://docs?query=") {
+        Ok(query_part.to_string())
+    } else if uri == "bun://docs" {
+        Ok("".to_string())
+    } else {
+        Err(format!("Invalid URI format: {}", uri))
+    }
+}
 
 fn init_logging() {
     tracing_subscriber::fmt()
@@ -127,7 +178,7 @@ async fn main() -> Result<()> {
                 error!("Failed to parse JSON-RPC request: {}", e);
                 let error_response = JsonRpcResponse::error(
                     serde_json::Value::Null,
-                    -32700,
+                    JSONRPC_PARSE_ERROR,
                     format!("Parse error: {}", e),
                 );
                 if let Ok(response_str) = serde_json::to_string(&error_response) {
@@ -148,7 +199,11 @@ async fn main() -> Result<()> {
             "initialize" => handle_initialize(&request),
             method => {
                 error!("Unsupported method: {}", method);
-                JsonRpcResponse::error(request.id, -32601, format!("Method not found: {}", method))
+                JsonRpcResponse::error(
+                    request.id,
+                    JSONRPC_METHOD_NOT_FOUND,
+                    format!("Method not found: {}", method),
+                )
             }
         };
 
@@ -196,7 +251,11 @@ async fn handle_tools_call(
         }
         Err(e) => {
             error!("Failed to forward request: {}", e);
-            JsonRpcResponse::error(request.id.clone(), -32603, format!("Internal error: {}", e))
+            JsonRpcResponse::error(
+                request.id.clone(),
+                JSONRPC_INTERNAL_ERROR,
+                format!("Internal error: {}", e),
+            )
         }
     }
 }
@@ -241,41 +300,32 @@ async fn handle_resources_read(
     client: &http::BunDocsClient,
     request: &JsonRpcRequest,
 ) -> JsonRpcResponse {
-    // Extract query from params
+    // Extract and validate params
     let params = match &request.params {
         Some(p) => p,
         None => {
             return JsonRpcResponse::error(
                 request.id.clone(),
-                -32602,
+                JSONRPC_INVALID_PARAMS,
                 "Missing params".to_string(),
             );
         }
     };
 
-    let uri = match params.get("uri") {
-        Some(u) if u.is_string() => u.as_str().unwrap(),
-        _ => {
-            return JsonRpcResponse::error(
-                request.id.clone(),
-                -32602,
-                "Missing or invalid uri parameter".to_string(),
-            );
+    // Extract URI parameter
+    let uri = match get_string_param(params, "uri") {
+        Ok(u) => u,
+        Err(msg) => {
+            return JsonRpcResponse::error(request.id.clone(), JSONRPC_INVALID_PARAMS, msg);
         }
     };
 
-    // Extract query from URI (e.g., bun://docs?query=Bun.serve)
-    let query = if let Some(query_part) = uri.strip_prefix("bun://docs?query=") {
-        query_part.to_string()
-    } else if uri == "bun://docs" {
-        // Default query
-        "".to_string()
-    } else {
-        return JsonRpcResponse::error(
-            request.id.clone(),
-            -32602,
-            format!("Invalid URI format: {}", uri),
-        );
+    // Parse URI to extract query
+    let query = match parse_bun_docs_uri(uri) {
+        Ok(q) => q,
+        Err(msg) => {
+            return JsonRpcResponse::error(request.id.clone(), JSONRPC_INVALID_PARAMS, msg);
+        }
     };
 
     // Forward to tools/call internally
@@ -308,7 +358,11 @@ async fn handle_resources_read(
         }
         Err(e) => {
             error!("Failed to read resource: {}", e);
-            JsonRpcResponse::error(request.id.clone(), -32603, format!("Internal error: {}", e))
+            JsonRpcResponse::error(
+                request.id.clone(),
+                JSONRPC_INTERNAL_ERROR,
+                format!("Internal error: {}", e),
+            )
         }
     }
 }
@@ -756,5 +810,34 @@ mod tests {
         let args = vec!["program".to_string(), "-V".to_string()];
         let result = handle_args(&args);
         assert!(result); // Should return true for version flag
+    }
+
+    #[test]
+    fn test_get_string_param() {
+        let params = json!({"uri": "bun://docs", "other": 123});
+
+        assert_eq!(get_string_param(&params, "uri").unwrap(), "bun://docs");
+        assert!(get_string_param(&params, "other").is_err());
+        assert!(get_string_param(&params, "missing").is_err());
+    }
+
+    #[test]
+    fn test_parse_bun_docs_uri() {
+        assert_eq!(parse_bun_docs_uri("bun://docs").unwrap(), "");
+        assert_eq!(parse_bun_docs_uri("bun://docs?query=test").unwrap(), "test");
+        assert_eq!(
+            parse_bun_docs_uri("bun://docs?query=Bun.serve").unwrap(),
+            "Bun.serve"
+        );
+        assert!(parse_bun_docs_uri("invalid://uri").is_err());
+        assert!(parse_bun_docs_uri("").is_err());
+    }
+
+    #[test]
+    fn test_jsonrpc_error_code_constants() {
+        assert_eq!(JSONRPC_PARSE_ERROR, -32700);
+        assert_eq!(JSONRPC_INVALID_PARAMS, -32602);
+        assert_eq!(JSONRPC_INTERNAL_ERROR, -32603);
+        assert_eq!(JSONRPC_METHOD_NOT_FOUND, -32601);
     }
 }
