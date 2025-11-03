@@ -67,11 +67,9 @@ EXAMPLES:
     );
 }
 
-fn handle_args() -> bool {
-    let args: Vec<String> = std::env::args().collect();
-
+fn handle_args(args: &[String]) -> bool {
     // Check for flags (skip first arg which is program name)
-    for arg in args.iter().skip(1) {
+    if let Some(arg) = args.get(1) {
         match arg.as_str() {
             "-h" | "--help" => {
                 print_help();
@@ -95,7 +93,8 @@ fn handle_args() -> bool {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Handle command-line arguments before starting proxy
-    if handle_args() {
+    let args: Vec<String> = std::env::args().collect();
+    if handle_args(&args) {
         return Ok(());
     }
 
@@ -506,8 +505,40 @@ mod tests {
     #[test]
     fn test_handle_args_no_args() {
         // Test with no args (simulate program name only)
-        // Note: In actual execution, there's always at least the program name
-        let result = handle_args();
+        let args = vec!["program".to_string()];
+        let result = handle_args(&args);
         assert!(!result); // Should return false when no flags present
+    }
+
+    #[test]
+    fn test_handle_args_help_flag() {
+        // Test --help flag
+        let args = vec!["program".to_string(), "--help".to_string()];
+        let result = handle_args(&args);
+        assert!(result); // Should return true for help flag
+    }
+
+    #[test]
+    fn test_handle_args_help_short_flag() {
+        // Test -h flag
+        let args = vec!["program".to_string(), "-h".to_string()];
+        let result = handle_args(&args);
+        assert!(result); // Should return true for help flag
+    }
+
+    #[test]
+    fn test_handle_args_version_flag() {
+        // Test --version flag
+        let args = vec!["program".to_string(), "--version".to_string()];
+        let result = handle_args(&args);
+        assert!(result); // Should return true for version flag
+    }
+
+    #[test]
+    fn test_handle_args_version_short_flag() {
+        // Test -V flag
+        let args = vec!["program".to_string(), "-V".to_string()];
+        let result = handle_args(&args);
+        assert!(result); // Should return true for version flag
     }
 }
