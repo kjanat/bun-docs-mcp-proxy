@@ -1,3 +1,29 @@
+//! Bun Docs MCP Proxy - Protocol adapter for Bun documentation search
+//!
+//! This proxy acts as a bridge between stdio-based MCP (Model Context Protocol) clients
+//! (like Zed editor) and the HTTP/SSE-based Bun documentation server at `https://bun.com/docs/mcp`.
+//!
+//! ## Request Flow
+//!
+//! ```text
+//! stdin (JSON-RPC) → Proxy → HTTP POST → bun.com/docs/mcp → SSE stream → parse → stdout (JSON-RPC)
+//! ```
+//!
+//! ## Supported JSON-RPC Methods
+//!
+//! - `initialize` - Initialize MCP connection, returns protocol version and capabilities
+//! - `tools/list` - List available tools (returns SearchBun tool)
+//! - `tools/call` - Execute a tool with parameters (forwarded to Bun Docs API)
+//! - `resources/list` - List available resources (returns Bun Documentation resource)
+//! - `resources/read` - Read a resource by URI (e.g., `bun://docs?query=Bun.serve`)
+//!
+//! ## Architecture
+//!
+//! The proxy consists of three main modules:
+//! - [`http`] - HTTP client with SSE parsing and retry logic
+//! - [`protocol`] - JSON-RPC 2.0 types and serialization
+//! - [`transport`] - Stdio transport layer for reading/writing messages
+
 mod http;
 mod protocol;
 mod transport;

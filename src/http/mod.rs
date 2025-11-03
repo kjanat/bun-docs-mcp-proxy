@@ -1,3 +1,27 @@
+//! HTTP client for the Bun Docs API with SSE support and automatic retries.
+//!
+//! This module provides a robust HTTP client that:
+//! - Forwards JSON-RPC requests to the Bun Docs API at `https://bun.com/docs/mcp`
+//! - Parses Server-Sent Events (SSE) responses from the API
+//! - Implements automatic retry logic with exponential backoff for transient failures
+//! - Provides testability via `with_base_url()` constructor for mock servers
+//!
+//! ## SSE Protocol Behavior
+//!
+//! The Bun Docs API may return responses as SSE (Server-Sent Events) or plain JSON,
+//! depending on the content-type header. When parsing SSE streams:
+//! - Only "message" and "completion" event types are processed
+//! - Heartbeat and other event types are ignored
+//! - **Important**: This implementation expects a complete JSON-RPC object in a single
+//!   SSE event. If the server streams partial deltas across multiple events, this
+//!   implementation will not accumulate them. Adjust `parse_sse_response()` if the
+//!   protocol changes to delta streaming.
+//!
+//! ## Retry Strategy
+//!
+//! Transient failures (network errors, 429, 5xx status codes) are retried up to
+//! [`MAX_RETRIES`] times with exponential backoff (200ms → 400ms → 800ms, capped at 1s).
+
 use anyhow::{Context, Result};
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
@@ -34,7 +58,14 @@ impl BunDocsClient {
     }
 
     /// Compute exponential backoff delay without external dependencies
+    ///
+    /// # Arguments
+    /// * `attempt` - Attempt number (must be >= 1)
+    ///
+    /// # Returns
+    /// Delay in milliseconds: 200ms, 400ms, 800ms (capped at 1000ms)
     fn backoff_delay_ms(attempt: usize) -> u64 {
+        debug_assert!(attempt > 0, "attempt must be >= 1");
         // 200ms, 400ms, 800ms (cap at 1000ms)
         let base = 200u64.saturating_mul(1u64 << (attempt.saturating_sub(1) as u32));
         base.min(1000)
@@ -207,6 +238,7 @@ impl BunDocsClient {
                         event.event.as_str()
                     };
                     if ev_type != "message" && ev_type != "completion" {
+                        debug!("Skipping SSE event type: {}", ev_type);
                         continue;
                     }
 

@@ -1,3 +1,36 @@
+//! JSON-RPC 2.0 protocol types and helpers
+//!
+//! This module provides type-safe representations of JSON-RPC 2.0 requests, responses,
+//! and errors, following the [JSON-RPC 2.0 specification](https://www.jsonrpc.org/specification).
+//!
+//! ## Types
+//!
+//! - [`JsonRpcRequest`] - Incoming JSON-RPC request with method and optional params
+//! - [`JsonRpcResponse`] - Outgoing JSON-RPC response with result or error
+//! - [`JsonRpcError`] - Error object with code, message, and optional data
+//!
+//! ## Error Codes
+//!
+//! Standard JSON-RPC 2.0 error codes are defined in `src/main.rs`:
+//! - `-32700` - Parse error (invalid JSON)
+//! - `-32600` - Invalid request (malformed JSON-RPC)
+//! - `-32601` - Method not found
+//! - `-32602` - Invalid params
+//! - `-32603` - Internal error
+//!
+//! ## Example Usage
+//!
+//! ```rust
+//! use serde_json::json;
+//! # use bun_docs_mcp_proxy::protocol::JsonRpcResponse;
+//!
+//! // Success response
+//! let response = JsonRpcResponse::success(json!(1), json!({"result": "data"}));
+//!
+//! // Error response
+//! let error = JsonRpcResponse::error(json!(1), -32601, "Method not found".to_string());
+//! ```
+
 use serde::{Deserialize, Serialize};
 
 // JSON-RPC 2.0 version constant

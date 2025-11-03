@@ -1,13 +1,32 @@
+//! Stdio transport layer for JSON-RPC communication
+//!
+//! This module provides an async stdio transport for reading JSON-RPC requests from stdin
+//! and writing JSON-RPC responses to stdout. It's designed for use with MCP (Model Context
+//! Protocol) clients that communicate over stdio, such as the Zed editor.
+//!
+//! ## Message Format
+//!
+//! - Messages are newline-delimited JSON (one JSON-RPC message per line)
+//! - Empty lines are ignored
+//! - EOF on stdin signals connection closure
+//!
+//! ## Logging
+//!
+//! All logging goes to stderr (not stdout) to avoid interfering with JSON-RPC messages.
+//! Long messages are truncated to [`DEBUG_MESSAGE_MAX_LEN`] characters in debug logs.
+//!
+//! ## Test Coverage Note
+//!
+//! Coverage for this module is lower (~56%) because `read_message` and `write_message`
+//! are tightly coupled to real stdin/stdout types, making them difficult to unit test.
+//! They are tested through integration tests and manual testing with the actual binary.
+
 use anyhow::{Context, Result};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::debug;
 
 // Maximum length of messages to show in debug logs
 const DEBUG_MESSAGE_MAX_LEN: usize = 80;
-
-// NOTE: Coverage for this module is lower (~65%) because read_message and write_message
-// are tightly coupled to real stdin/stdout types, making them difficult to unit test.
-// They are tested through integration tests and manual testing with the actual binary.
 pub struct StdioTransport {
     stdin: BufReader<tokio::io::Stdin>,
     stdout: tokio::io::Stdout,
