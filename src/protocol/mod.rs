@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+// JSON-RPC 2.0 version constant
+const JSONRPC_VERSION: &str = "2.0";
+
 #[derive(Debug, Deserialize)]
 pub struct JsonRpcRequest {
     #[allow(dead_code)]
@@ -28,10 +31,30 @@ pub struct JsonRpcError {
     pub data: Option<serde_json::Value>,
 }
 
+impl JsonRpcError {
+    /// Create a new JSON-RPC error without additional data
+    pub fn new(code: i32, message: String) -> Self {
+        Self {
+            code,
+            message,
+            data: None,
+        }
+    }
+
+    /// Create a new JSON-RPC error with additional data
+    pub fn with_data(code: i32, message: String, data: serde_json::Value) -> Self {
+        Self {
+            code,
+            message,
+            data: Some(data),
+        }
+    }
+}
+
 impl JsonRpcResponse {
     pub fn success(id: serde_json::Value, result: serde_json::Value) -> Self {
         Self {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: JSONRPC_VERSION.to_string(),
             id,
             result: Some(result),
             error: None,
@@ -40,14 +63,25 @@ impl JsonRpcResponse {
 
     pub fn error(id: serde_json::Value, code: i32, message: String) -> Self {
         Self {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: JSONRPC_VERSION.to_string(),
             id,
             result: None,
-            error: Some(JsonRpcError {
-                code,
-                message,
-                data: None,
-            }),
+            error: Some(JsonRpcError::new(code, message)),
+        }
+    }
+
+    /// Create an error response with additional data
+    pub fn error_with_data(
+        id: serde_json::Value,
+        code: i32,
+        message: String,
+        data: serde_json::Value,
+    ) -> Self {
+        Self {
+            jsonrpc: JSONRPC_VERSION.to_string(),
+            id,
+            result: None,
+            error: Some(JsonRpcError::with_data(code, message, data)),
         }
     }
 }
@@ -116,5 +150,45 @@ mod tests {
 
         // Verify data field is omitted when None
         assert!(!serialized.contains("\"data\""));
+    }
+
+    #[test]
+    fn test_jsonrpc_version_constant() {
+        assert_eq!(JSONRPC_VERSION, "2.0");
+    }
+
+    #[test]
+    fn test_jsonrpc_error_new() {
+        let error = JsonRpcError::new(-32700, "Parse error".to_string());
+        assert_eq!(error.code, -32700);
+        assert_eq!(error.message, "Parse error");
+        assert!(error.data.is_none());
+    }
+
+    #[test]
+    fn test_jsonrpc_error_with_data() {
+        let data = json!({"details": "additional info"});
+        let error = JsonRpcError::with_data(-32700, "Parse error".to_string(), data.clone());
+        assert_eq!(error.code, -32700);
+        assert_eq!(error.message, "Parse error");
+        assert_eq!(error.data, Some(data));
+    }
+
+    #[test]
+    fn test_error_response_with_data() {
+        let data = json!({"reason": "invalid format"});
+        let response = JsonRpcResponse::error_with_data(
+            json!(1),
+            -32700,
+            "Parse error".to_string(),
+            data.clone(),
+        );
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert_eq!(serialized["jsonrpc"], "2.0");
+        assert_eq!(serialized["id"], 1);
+        assert_eq!(serialized["error"]["code"], -32700);
+        assert_eq!(serialized["error"]["message"], "Parse error");
+        assert_eq!(serialized["error"]["data"], data);
     }
 }
