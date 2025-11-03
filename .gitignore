@@ -287,3 +287,5 @@ tarpaulin-report.html
 cobertura.xml
 
 lcov.info
+
+.playwright-mcp/
