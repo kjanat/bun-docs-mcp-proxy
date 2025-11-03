@@ -42,6 +42,7 @@ impl JsonRpcError {
     }
 
     /// Create a new JSON-RPC error with additional data
+    #[allow(dead_code)]
     pub fn with_data(code: i32, message: String, data: serde_json::Value) -> Self {
         Self {
             code,
@@ -71,6 +72,7 @@ impl JsonRpcResponse {
     }
 
     /// Create an error response with additional data
+    #[allow(dead_code)]
     pub fn error_with_data(
         id: serde_json::Value,
         code: i32,
