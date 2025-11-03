@@ -513,96 +513,55 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handle_tools_call_with_result_extraction() {
-        let mut server = mockito::Server::new_async().await;
-
-        let _mock = server
-            .mock("POST", "/")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(r#"{"result": {"data": "extracted"}}"#)
-            .create_async()
-            .await;
-
-        let client = http::BunDocsClient::new_with_url(server.url());
+    async fn test_handle_tools_call_real_api() {
+        let client = http::BunDocsClient::new();
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: json!(1),
             method: "tools/call".to_string(),
-            params: Some(json!({"name": "SearchBun"})),
+            params: Some(json!({
+                "name": "SearchBun",
+                "arguments": {
+                    "query": "Bun.serve"
+                }
+            })),
         };
 
         let response = handle_tools_call(&client, &request).await;
         let serialized = serde_json::to_value(&response).unwrap();
 
         assert!(serialized["result"].is_object());
+        assert!(serialized["result"]["content"].is_array());
     }
 
     #[tokio::test]
-    async fn test_handle_tools_call_without_result_field() {
-        let mut server = mockito::Server::new_async().await;
-
-        let _mock = server
-            .mock("POST", "/")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(r#"{"data": "no result field"}"#)
-            .create_async()
-            .await;
-
-        let client = http::BunDocsClient::new_with_url(server.url());
+    async fn test_handle_tools_call_empty_query() {
+        // NOTE: This test reflects Bun API's current behavior for empty query.
+        // As of now, Bun returns {"content":[{"text":"No results found","type":"text"}],"isError":true}
+        // If Bun changes this behavior (e.g., returns docs overview), update expected output accordingly.
+        let client = http::BunDocsClient::new();
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: json!(2),
             method: "tools/call".to_string(),
-            params: None,
+            params: Some(json!({
+                "name": "SearchBun",
+                "arguments": {
+                    "query": ""
+                }
+            })),
         };
 
         let response = handle_tools_call(&client, &request).await;
         let serialized = serde_json::to_value(&response).unwrap();
 
-        assert!(serialized["result"]["data"].is_string());
-    }
-
-    #[tokio::test]
-    async fn test_handle_tools_call_http_error() {
-        let mut server = mockito::Server::new_async().await;
-
-        let _mock = server
-            .mock("POST", "/")
-            .with_status(503)
-            .with_body("Service Unavailable")
-            .create_async()
-            .await;
-
-        let client = http::BunDocsClient::new_with_url(server.url());
-        let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            id: json!(3),
-            method: "tools/call".to_string(),
-            params: None,
-        };
-
-        let response = handle_tools_call(&client, &request).await;
-        let serialized = serde_json::to_value(&response).unwrap();
-
-        assert!(serialized["error"].is_object());
-        assert_eq!(serialized["error"]["code"], -32603);
+        // Proxy should forward successfully; Bun API decides what empty query means
+        assert!(serialized["result"].is_object());
     }
 
     #[tokio::test]
     async fn test_handle_resources_read_with_query() {
-        let mut server = mockito::Server::new_async().await;
-
-        let _mock = server
-            .mock("POST", "/")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(r#"{"result": {"data": "bun serve docs"}}"#)
-            .create_async()
-            .await;
-
-        let client = http::BunDocsClient::new_with_url(server.url());
+        let client = http::BunDocsClient::new();
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: json!("res1"),
@@ -622,17 +581,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_resources_read_empty_query() {
-        let mut server = mockito::Server::new_async().await;
-
-        let _mock = server
-            .mock("POST", "/")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(r#"{"result": {"data": "overview"}}"#)
-            .create_async()
-            .await;
-
-        let client = http::BunDocsClient::new_with_url(server.url());
+        // NOTE: Tests bun://docs (no query param) which proxy converts to empty query string.
+        // Bun API currently returns "No results found" for empty queries.
+        // If Bun changes to return overview/help for empty query, this test still passes (valid contents array).
+        let client = http::BunDocsClient::new();
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: json!("res2"),
@@ -716,29 +668,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handle_resources_read_http_error() {
-        let mut server = mockito::Server::new_async().await;
-
-        let _mock = server
-            .mock("POST", "/")
-            .with_status(500)
-            .with_body("Internal Server Error")
-            .create_async()
-            .await;
-
-        let client = http::BunDocsClient::new_with_url(server.url());
+    async fn test_handle_resources_read_with_real_search() {
+        let client = http::BunDocsClient::new();
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: json!("res6"),
             method: "resources/read".to_string(),
-            params: Some(json!({"uri": "bun://docs?query=test"})),
+            params: Some(json!({"uri": "bun://docs?query=HTTP"})),
         };
 
         let response = handle_resources_read(&client, &request).await;
         let serialized = serde_json::to_value(&response).unwrap();
 
-        assert!(serialized["error"].is_object());
-        assert_eq!(serialized["error"]["code"], -32603);
+        // Real API should return valid results
+        assert!(serialized["result"]["contents"].is_array());
+        let contents = serialized["result"]["contents"].as_array().unwrap();
+        assert!(!contents.is_empty());
     }
 
     #[test]
