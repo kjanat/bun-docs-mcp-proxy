@@ -1,6 +1,8 @@
 # Bun Docs MCP Proxy
 
 [![CI](https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/ci.yml)
+[![Release](https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/release.yml/badge.svg)](https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/release.yml)
+[![codecov](https://codecov.io/gh/kjanat/bun-docs-mcp-proxy/graph/badge.svg?token=ySY6HF2Vbx)](https://codecov.io/gh/kjanat/bun-docs-mcp-proxy)
 
 Native Rust proxy for Bun documentation MCP context server. Bridges Zed's stdio-based MCP client with the Bun HTTP MCP
 server at `https://bun.com/docs/mcp`.
@@ -32,17 +34,77 @@ Reads JSON-RPC 2.0 messages from stdin, forwards to `bun.com/docs/mcp`, and writ
 
 ## Testing
 
-Run the test suite:
+### Quick Start
+
+```bash
+# Run all tests
+make test
+
+# Or use cargo directly
+cargo test
+```
+
+### Test Categories
+
+**Unit Tests** - Test individual components:
+
+```bash
+make test-unit
+# Or: cargo test --lib --bins
+```
+
+**Integration Tests** - Test complete workflows:
+
+```bash
+make test-integration
+# Or: cargo test --test '*'
+```
+
+**Documentation Tests** - Test code examples in docs:
+
+```bash
+make test-doc
+# Or: cargo test --doc
+```
+
+**Shell Integration Tests** - Test the complete proxy:
 
 ```bash
 ./test-proxy.sh
 ```
 
-Manual test:
+### Code Coverage
+
+Generate HTML coverage report:
+
+```bash
+make coverage
+# Opens tarpaulin-report.html
+```
+
+### Manual Testing
+
+Test a specific method:
 
 ```bash
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"SearchBun","arguments":{"query":"Bun.serve"}}}' | \
 ./target/release/bun-docs-mcp-proxy
+```
+
+### Development Tools
+
+Install recommended dev tools:
+
+```bash
+make install-tools
+# Installs: cargo-tarpaulin, cargo-watch
+```
+
+Watch mode for continuous testing:
+
+```bash
+make watch
+# Or: cargo watch -x test
 ```
 
 ## Logging

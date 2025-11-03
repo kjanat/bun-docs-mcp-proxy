@@ -41,8 +41,11 @@ jobs:
       - name: Build
         run: cargo build --verbose
 
-      - name: Run tests
+      - name: Run unit tests
         run: cargo test --verbose
+
+      - name: Run doc tests
+        run: cargo test --doc --verbose
 
       - name: Install test dependencies
         run: sudo apt-get update && sudo apt-get install -y jq
@@ -51,6 +54,28 @@ jobs:
         run: |
           cargo build --release
           bash test-proxy.sh
+
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin
+
+      - name: Generate coverage
+        run: cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          slug: kjanat/bun-docs-mcp-proxy
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   fmt:
     name: Format

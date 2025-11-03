@@ -155,3 +155,73 @@ fn handle_initialize(request: &JsonRpcRequest) -> JsonRpcResponse {
 
     JsonRpcResponse::success(request.id.clone(), init_result)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_handle_initialize() {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!(1),
+            method: "initialize".to_string(),
+            params: None,
+        };
+
+        let response = handle_initialize(&request);
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert_eq!(serialized["id"], 1);
+        assert_eq!(serialized["result"]["protocolVersion"], "2024-11-05");
+        assert_eq!(
+            serialized["result"]["serverInfo"]["name"],
+            "bun-docs-mcp-proxy"
+        );
+        assert!(serialized["result"]["capabilities"]["tools"].is_object());
+    }
+
+    #[test]
+    fn test_handle_tools_list() {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!("test-id"),
+            method: "tools/list".to_string(),
+            params: None,
+        };
+
+        let response = handle_tools_list(&request);
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert_eq!(serialized["id"], "test-id");
+        assert!(serialized["result"]["tools"].is_array());
+
+        let tools = serialized["result"]["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], "SearchBun");
+        assert_eq!(
+            tools[0]["inputSchema"]["properties"]["query"]["type"],
+            "string"
+        );
+    }
+
+    #[test]
+    fn test_parse_valid_jsonrpc_request() {
+        let message = r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#;
+        let request: Result<JsonRpcRequest, _> = serde_json::from_str(&message);
+
+        assert!(request.is_ok());
+        let req = request.unwrap();
+        assert_eq!(req.method, "initialize");
+        assert_eq!(req.id, json!(1));
+    }
+
+    #[test]
+    fn test_parse_invalid_jsonrpc_request() {
+        let message = r#"{"invalid json"#;
+        let request: Result<JsonRpcRequest, _> = serde_json::from_str(&message);
+
+        assert!(request.is_err());
+    }
+}
