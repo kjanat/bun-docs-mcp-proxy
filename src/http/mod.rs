@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
-use reqwest::Client;
+use reqwest::{Client, StatusCode, Url};
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
@@ -10,61 +10,150 @@ const REQUEST_TIMEOUT_SECS: u64 = 5;
 
 pub struct BunDocsClient {
     client: Client,
-    base_url: String,
+    base_url: Url,
 }
 
 impl BunDocsClient {
     pub fn new() -> Self {
         Self {
             client: Client::new(),
-            base_url: BUN_DOCS_API.to_string(),
+            base_url: Url::parse(BUN_DOCS_API).expect("valid base URL"),
         }
     }
 
     pub async fn forward_request(&self, request: Value) -> Result<Value> {
         debug!("Forwarding request to Bun Docs API");
 
-        // Send HTTP POST with JSON-RPC request
-        let response = self
-            .client
-            .post(&self.base_url)
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json, text/event-stream")
-            .json(&request)
-            .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
-            .send()
-            .await
-            .context("Failed to send request to Bun Docs API")?;
+        const MAX_RETRIES: usize = 3;
 
-        let status = response.status();
-        info!("Bun Docs API response status: {}", status);
-
-        if !status.is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "unknown error".to_string());
-            anyhow::bail!("Bun Docs API error: {} - {}", status, error_text);
+        // Small helper to compute exponential backoff without external deps
+        fn backoff_delay_ms(attempt: usize) -> u64 {
+            // 200ms, 400ms, 800ms (cap at 1000ms)
+            let base = 200u64.saturating_mul(1u64 << (attempt.saturating_sub(1) as u32));
+            base.min(1000)
         }
 
-        let content_type = response
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
+        let mut last_err: Option<anyhow::Error> = None;
 
-        // Parse SSE stream
-        if content_type.contains("text/event-stream") {
-            debug!("Parsing SSE stream");
-            return self.parse_sse_response(response).await;
+        for attempt in 1..=MAX_RETRIES {
+            // Build request each attempt
+            let rb = self
+                .client
+                .post(self.base_url.as_str())
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .json(&request)
+                .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS));
+
+            return match rb.send().await {
+                Ok(response) => {
+                    let status = response.status();
+                    info!(
+                        "Bun Docs API response status: {} (attempt {} of {})",
+                        status, attempt, MAX_RETRIES
+                    );
+
+                    // Normalize content-type header early for both success and error paths
+                    let headers = response.headers().clone();
+                    let content_type_raw = headers
+                        .get("content-type")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    let main_content_type = content_type_raw
+                        .split(';')
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                        .to_ascii_lowercase();
+
+                    if !status.is_success() {
+                        // Read body (truncated) for context
+                        let bytes = response.bytes().await.unwrap_or_default();
+                        let mut body = String::from_utf8_lossy(&bytes).to_string();
+                        if body.len() > 2048 {
+                            body.truncate(2048);
+                        }
+
+                        // Build a small header summary (up to 8 headers)
+                        let header_summary = headers
+                            .iter()
+                            .take(8)
+                            .map(|(k, v)| {
+                                format!("{}: {}", k.as_str(), v.to_str().unwrap_or("<binary>"))
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+
+                        let err = anyhow::anyhow!(
+                            "Bun Docs API error: status={} content_type={} headers=[{}] body_snippet=\"{}\"",
+                            status,
+                            if main_content_type.is_empty() {
+                                "<none>"
+                            } else {
+                                &main_content_type
+                            },
+                            header_summary,
+                            body
+                        );
+
+                        // Retry on transient server statuses
+                        if matches!(
+                            status,
+                            StatusCode::TOO_MANY_REQUESTS
+                                | StatusCode::INTERNAL_SERVER_ERROR
+                                | StatusCode::BAD_GATEWAY
+                                | StatusCode::SERVICE_UNAVAILABLE
+                                | StatusCode::GATEWAY_TIMEOUT
+                        ) && attempt < MAX_RETRIES
+                        {
+                            warn!(
+                                "Transient HTTP status {}, retrying (attempt {})",
+                                status,
+                                attempt + 1
+                            );
+                            let delay = backoff_delay_ms(attempt);
+                            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                            last_err = Some(err);
+                            continue;
+                        }
+
+                        return Err(err);
+                    }
+
+                    // Success: decide how to parse
+                    if main_content_type.starts_with("text/event-stream") {
+                        debug!("Parsing SSE stream");
+                        return self.parse_sse_response(response).await;
+                    }
+
+                    debug!("Parsing regular JSON response");
+                    response
+                        .json()
+                        .await
+                        .context("Failed to parse JSON response")
+                }
+                Err(e) => {
+                    // Connection/timeout/etc. Retry if transient
+                    let is_transient = e.is_connect() || e.is_timeout() || e.is_request();
+                    let err = anyhow::anyhow!("Failed to send request to Bun Docs API: {}", e);
+                    if is_transient && attempt < MAX_RETRIES {
+                        warn!(
+                            "Network error: {}. Retrying (attempt {} of {})",
+                            err,
+                            attempt + 1,
+                            MAX_RETRIES
+                        );
+                        let delay = backoff_delay_ms(attempt);
+                        tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                        last_err = Some(err);
+                        continue;
+                    }
+                    Err(err)
+                }
+            };
         }
 
-        // Fallback to regular JSON
-        debug!("Parsing regular JSON response");
-        response
-            .json()
-            .await
-            .context("Failed to parse JSON response")
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("Unknown error sending request")))
     }
 
     async fn parse_sse_response(&self, response: reqwest::Response) -> Result<Value> {
@@ -76,14 +165,25 @@ impl BunDocsClient {
                 Ok(event) => {
                     debug!("SSE event type: {:?}", event.event);
 
+                    // Only handle message-like events; ignore heartbeats/others
+                    let ev_type = if event.event.is_empty() {
+                        "message"
+                    } else {
+                        event.event.as_str()
+                    };
+                    if ev_type != "message" && ev_type != "completion" {
+                        continue;
+                    }
+
                     let data = event.data;
                     if !data.is_empty() {
                         match serde_json::from_str::<Value>(&data) {
                             Ok(parsed) => {
                                 debug!("Parsed SSE data successfully");
 
-                                // Based on protocol analysis, the SSE data contains
-                                // the complete JSON-RPC response
+                                // Note: this implementation expects a complete JSON-RPC object in one event.
+                                // If the server streams partial deltas, we do not accumulate them here.
+                                // Adjust if protocol changes to delta streaming.
                                 if parsed.get("result").is_some() || parsed.get("error").is_some() {
                                     json_response = Some(parsed);
                                     // Found the JSON-RPC response, we can stop
@@ -116,7 +216,7 @@ mod tests {
     #[test]
     fn test_client_creation() {
         let client = BunDocsClient::new();
-        assert_eq!(client.base_url, BUN_DOCS_API);
+        assert_eq!(client.base_url.as_str(), BUN_DOCS_API);
     }
 
     #[tokio::test]
@@ -234,8 +334,8 @@ mod tests {
     #[test]
     fn test_http_status_detection() {
         // Test status code checking logic
-        let status_ok = reqwest::StatusCode::OK;
-        let status_error = reqwest::StatusCode::INTERNAL_SERVER_ERROR;
+        let status_ok = StatusCode::OK;
+        let status_error = StatusCode::INTERNAL_SERVER_ERROR;
 
         assert!(status_ok.is_success());
         assert!(!status_error.is_success());
