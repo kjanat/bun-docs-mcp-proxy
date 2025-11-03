@@ -6,6 +6,24 @@
 //! - Implements automatic retry logic with exponential backoff for transient failures
 //! - Provides testability via `with_base_url()` constructor for mock servers
 //!
+//! ## Example
+//!
+//! ```no_run
+//! use bun_docs_mcp_proxy::http::BunDocsClient;
+//! use serde_json::json;
+//!
+//! # async fn example() -> anyhow::Result<()> {
+//! let client = BunDocsClient::new();
+//! let request = json!({
+//!     "jsonrpc": "2.0",
+//!     "id": 1,
+//!     "method": "tools/list"
+//! });
+//! let response = client.forward_request(request).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
 //! ## SSE Protocol Behavior
 //!
 //! The Bun Docs API may return responses as SSE (Server-Sent Events) or plain JSON,
@@ -33,6 +51,8 @@ use tracing::{debug, info, warn};
 const BUN_DOCS_API: &str = "https://bun.com/docs/mcp";
 const REQUEST_TIMEOUT_SECS: u64 = 5;
 const MAX_RETRIES: usize = 3;
+const BACKOFF_BASE_MS: u64 = 200;
+const BACKOFF_MAX_MS: u64 = 1000;
 
 pub struct BunDocsClient {
     client: Client,
@@ -46,6 +66,10 @@ impl Default for BunDocsClient {
 }
 
 impl BunDocsClient {
+    /// Creates a new client with the default Bun Docs API URL.
+    ///
+    /// # Panics
+    /// Panics if the hardcoded URL is invalid (should never happen in practice).
     pub fn new() -> Self {
         Self::with_base_url(BUN_DOCS_API).expect("valid base URL")
     }
@@ -67,8 +91,8 @@ impl BunDocsClient {
     fn backoff_delay_ms(attempt: usize) -> u64 {
         debug_assert!(attempt > 0, "attempt must be >= 1");
         // 200ms, 400ms, 800ms (cap at 1000ms)
-        let base = 200u64.saturating_mul(1u64 << (attempt.saturating_sub(1) as u32));
-        base.min(1000)
+        let base = BACKOFF_BASE_MS.saturating_mul(1u64 << (attempt.saturating_sub(1) as u32));
+        base.min(BACKOFF_MAX_MS)
     }
 
     /// Check if HTTP status code indicates a transient error worth retrying
@@ -107,7 +131,7 @@ impl BunDocsClient {
     }
 
     /// Truncate string to max length, preserving UTF-8 boundaries
-    fn truncate_utf8(s: String, max_len: usize) -> String {
+    fn truncate_utf8(s: &str, max_len: usize) -> &str {
         if s.len() <= max_len {
             return s;
         }
@@ -120,7 +144,7 @@ impl BunDocsClient {
             }
             last_valid = end_pos;
         }
-        s[..last_valid].to_string()
+        &s[..last_valid]
     }
 
     pub async fn forward_request(&self, request: Value) -> Result<Value> {
@@ -154,9 +178,12 @@ impl BunDocsClient {
 
                     if !status.is_success() {
                         // Read body (truncated) for context
-                        let bytes = response.bytes().await.unwrap_or_default();
-                        let body = String::from_utf8_lossy(&bytes).to_string();
-                        let body_snippet = Self::truncate_utf8(body, 2048);
+                        let bytes = response.bytes().await.unwrap_or_else(|e| {
+                            warn!("Failed to read error response body: {}", e);
+                            Default::default()
+                        });
+                        let body = String::from_utf8_lossy(&bytes);
+                        let body_snippet = Self::truncate_utf8(&body, 2048);
                         let header_summary = Self::summarize_headers(&headers);
 
                         let err = anyhow::anyhow!(
@@ -376,18 +403,18 @@ mod tests {
 
     #[test]
     fn test_truncate_utf8() {
-        let short = "hello".to_string();
-        assert_eq!(BunDocsClient::truncate_utf8(short.clone(), 10), short);
+        let short = "hello";
+        assert_eq!(BunDocsClient::truncate_utf8(short, 10), short);
 
         let long = "a".repeat(100);
-        let truncated = BunDocsClient::truncate_utf8(long, 50);
+        let truncated = BunDocsClient::truncate_utf8(&long, 50);
         assert!(truncated.len() <= 50);
         assert!(!truncated.is_empty());
         assert!(truncated.is_char_boundary(truncated.len()));
 
         // Test with Unicode characters
-        let unicode = "hello 世界".to_string();
-        let truncated = BunDocsClient::truncate_utf8(unicode.clone(), 8);
+        let unicode = "hello 世界";
+        let truncated = BunDocsClient::truncate_utf8(unicode, 8);
         assert!(truncated.len() <= 8);
         assert!(truncated.is_char_boundary(truncated.len()));
     }
@@ -442,8 +469,19 @@ mod tests {
         });
 
         let result = client.forward_request(request).await;
-        // Either error response or API error, both valid
-        assert!(result.is_ok() || result.is_err());
+        // The API should either return a JSON-RPC error response or fail with an HTTP error
+        match result {
+            Ok(response) => {
+                // If successful, should have an error field in JSON-RPC response
+                assert!(
+                    response.get("error").is_some(),
+                    "Expected error field in response"
+                );
+            }
+            Err(_) => {
+                // HTTP-level error is also acceptable
+            }
+        }
     }
 
     #[tokio::test]
@@ -568,5 +606,223 @@ mod tests {
         let long_data = "a".repeat(300);
         let truncated = &long_data[..long_data.len().min(200)];
         assert_eq!(truncated.len(), 200);
+    }
+
+    // Retry behavior tests with mockito
+    #[tokio::test]
+    async fn test_retry_on_transient_status_503() {
+        let mut server = mockito::Server::new_async().await;
+
+        // First request fails with 503
+        let mock1 = server
+            .mock("POST", "/")
+            .with_status(503)
+            .with_header("content-type", "text/plain")
+            .with_body("Service Unavailable")
+            .expect(1)
+            .create_async()
+            .await;
+
+        // Second request succeeds
+        let mock2 = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"result": {"tools": []}}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::with_base_url(&server.url()).unwrap();
+        let request = json!({"method": "tools/list"});
+
+        let result = client.forward_request(request).await;
+
+        mock1.assert_async().await;
+        mock2.assert_async().await;
+        assert!(result.is_ok(), "Should succeed after retry");
+        assert!(result.unwrap().get("result").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_retry_exhaustion_on_persistent_503() {
+        let mut server = mockito::Server::new_async().await;
+
+        // All 3 attempts fail with 503
+        let mock = server
+            .mock("POST", "/")
+            .with_status(503)
+            .with_header("content-type", "text/plain")
+            .with_body("Service Unavailable")
+            .expect(3)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::with_base_url(&server.url()).unwrap();
+        let request = json!({"method": "tools/list"});
+
+        let result = client.forward_request(request).await;
+
+        mock.assert_async().await;
+        assert!(result.is_err(), "Should fail after exhausting retries");
+        assert!(result.unwrap_err().to_string().contains("503"));
+    }
+
+    #[tokio::test]
+    async fn test_no_retry_on_non_transient_404() {
+        let mut server = mockito::Server::new_async().await;
+
+        // 404 is not transient, should not retry
+        let mock = server
+            .mock("POST", "/")
+            .with_status(404)
+            .with_header("content-type", "text/plain")
+            .with_body("Not Found")
+            .expect(1)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::with_base_url(&server.url()).unwrap();
+        let request = json!({"method": "tools/list"});
+
+        let result = client.forward_request(request).await;
+
+        mock.assert_async().await;
+        assert!(result.is_err(), "Should fail without retry on 404");
+        assert!(result.unwrap_err().to_string().contains("404"));
+    }
+
+    #[tokio::test]
+    async fn test_retry_on_429_rate_limit() {
+        let mut server = mockito::Server::new_async().await;
+
+        // First request gets rate limited
+        let mock1 = server
+            .mock("POST", "/")
+            .with_status(429)
+            .with_header("content-type", "text/plain")
+            .with_body("Too Many Requests")
+            .expect(1)
+            .create_async()
+            .await;
+
+        // Second request succeeds
+        let mock2 = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"result": {"data": "success"}}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::with_base_url(&server.url()).unwrap();
+        let request = json!({"method": "test"});
+
+        let result = client.forward_request(request).await;
+
+        mock1.assert_async().await;
+        mock2.assert_async().await;
+        assert!(result.is_ok(), "Should succeed after retrying 429");
+    }
+
+    #[tokio::test]
+    async fn test_retry_on_500_internal_error() {
+        let mut server = mockito::Server::new_async().await;
+
+        // First request fails with 500
+        let mock1 = server
+            .mock("POST", "/")
+            .with_status(500)
+            .with_header("content-type", "text/plain")
+            .with_body("Internal Server Error")
+            .expect(1)
+            .create_async()
+            .await;
+
+        // Second request succeeds
+        let mock2 = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"result": {}}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::with_base_url(&server.url()).unwrap();
+        let request = json!({"method": "test"});
+
+        let result = client.forward_request(request).await;
+
+        mock1.assert_async().await;
+        mock2.assert_async().await;
+        assert!(result.is_ok(), "Should succeed after retrying 500");
+    }
+
+    #[tokio::test]
+    async fn test_retry_on_502_bad_gateway() {
+        let mut server = mockito::Server::new_async().await;
+
+        // Simulate bad gateway then recovery
+        let mock1 = server
+            .mock("POST", "/")
+            .with_status(502)
+            .with_body("Bad Gateway")
+            .expect(1)
+            .create_async()
+            .await;
+
+        let mock2 = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"result": {}}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::with_base_url(&server.url()).unwrap();
+        let request = json!({"method": "test"});
+
+        let result = client.forward_request(request).await;
+
+        mock1.assert_async().await;
+        mock2.assert_async().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_retry_timing_exponential_backoff() {
+        use std::time::Instant;
+
+        let mut server = mockito::Server::new_async().await;
+
+        // All requests fail to test backoff timing
+        let mock = server
+            .mock("POST", "/")
+            .with_status(503)
+            .with_body("Unavailable")
+            .expect(3)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::with_base_url(&server.url()).unwrap();
+        let request = json!({"method": "test"});
+
+        let start = Instant::now();
+        let _ = client.forward_request(request).await;
+        let elapsed = start.elapsed();
+
+        mock.assert_async().await;
+
+        // With 3 attempts and delays of 200 ms, 400 ms:
+        // Total should be at least 600 ms (200 + 400)
+        // But allow some margin for execution time
+        assert!(
+            elapsed.as_millis() >= 550,
+            "Expected at least 600 ms for backoff, got {}ms",
+            elapsed.as_millis()
+        );
     }
 }
