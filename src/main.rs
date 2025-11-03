@@ -44,6 +44,8 @@ SUPPORTED METHODS:
     initialize       Initialize the MCP connection
     tools/list       List available tools (SearchBun)
     tools/call       Call a tool with parameters
+    resources/list   List available resources (Bun Documentation)
+    resources/read   Read a resource by URI
 
 ENVIRONMENT VARIABLES:
     RUST_LOG         Set logging level (debug, info, warn, error)
@@ -141,6 +143,8 @@ async fn main() -> Result<()> {
         let response = match request.method.as_str() {
             "tools/call" => handle_tools_call(&http_client, &request).await,
             "tools/list" => handle_tools_list(&request),
+            "resources/list" => handle_resources_list(&request),
+            "resources/read" => handle_resources_read(&http_client, &request).await,
             "initialize" => handle_initialize(&request),
             method => {
                 error!("Unsupported method: {}", method);
@@ -219,12 +223,103 @@ fn handle_tools_list(request: &JsonRpcRequest) -> JsonRpcResponse {
     JsonRpcResponse::success(request.id.clone(), tools)
 }
 
+fn handle_resources_list(request: &JsonRpcRequest) -> JsonRpcResponse {
+    // Return available resources
+    let resources = serde_json::json!({
+        "resources": [{
+            "uri": "bun://docs",
+            "name": "Bun Documentation",
+            "description": "Search and browse Bun documentation",
+            "mimeType": "application/json"
+        }]
+    });
+
+    JsonRpcResponse::success(request.id.clone(), resources)
+}
+
+async fn handle_resources_read(
+    client: &http::BunDocsClient,
+    request: &JsonRpcRequest,
+) -> JsonRpcResponse {
+    // Extract query from params
+    let params = match &request.params {
+        Some(p) => p,
+        None => {
+            return JsonRpcResponse::error(
+                request.id.clone(),
+                -32602,
+                "Missing params".to_string(),
+            );
+        }
+    };
+
+    let uri = match params.get("uri") {
+        Some(u) if u.is_string() => u.as_str().unwrap(),
+        _ => {
+            return JsonRpcResponse::error(
+                request.id.clone(),
+                -32602,
+                "Missing or invalid uri parameter".to_string(),
+            );
+        }
+    };
+
+    // Extract query from URI (e.g., bun://docs?query=Bun.serve)
+    let query = if let Some(query_part) = uri.strip_prefix("bun://docs?query=") {
+        query_part.to_string()
+    } else if uri == "bun://docs" {
+        // Default query
+        "".to_string()
+    } else {
+        return JsonRpcResponse::error(
+            request.id.clone(),
+            -32602,
+            format!("Invalid URI format: {}", uri),
+        );
+    };
+
+    // Forward to tools/call internally
+    let search_request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": request.id,
+        "method": "tools/call",
+        "params": {
+            "name": "SearchBun",
+            "arguments": {
+                "query": query
+            }
+        }
+    });
+
+    match client.forward_request(search_request).await {
+        Ok(result) => {
+            info!("Successfully got resource from Bun Docs");
+
+            // Wrap in resource format
+            let resource_response = serde_json::json!({
+                "contents": [{
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": serde_json::to_string(&result).unwrap_or_default()
+                }]
+            });
+
+            JsonRpcResponse::success(request.id.clone(), resource_response)
+        }
+        Err(e) => {
+            error!("Failed to read resource: {}", e);
+            JsonRpcResponse::error(request.id.clone(), -32603, format!("Internal error: {}", e))
+        }
+    }
+}
+
 fn handle_initialize(request: &JsonRpcRequest) -> JsonRpcResponse {
     // Handle MCP initialize request
     let init_result = serde_json::json!({
         "protocolVersion": "2024-11-05",
         "capabilities": {
-            "tools": {}
+            "tools": {},
+            "resources": {}
         },
         "serverInfo": {
             "name": "bun-docs-mcp-proxy",
@@ -372,6 +467,31 @@ mod tests {
 
         // Verify protocol version matches MCP spec
         assert_eq!(serialized["result"]["protocolVersion"], "2024-11-05");
+        // Verify both capabilities are present
+        assert!(serialized["result"]["capabilities"]["tools"].is_object());
+        assert!(serialized["result"]["capabilities"]["resources"].is_object());
+    }
+
+    #[test]
+    fn test_handle_resources_list() {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!("res-list"),
+            method: "resources/list".to_string(),
+            params: None,
+        };
+
+        let response = handle_resources_list(&request);
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert_eq!(serialized["id"], "res-list");
+        assert!(serialized["result"]["resources"].is_array());
+
+        let resources = serialized["result"]["resources"].as_array().unwrap();
+        assert_eq!(resources.len(), 1);
+        assert_eq!(resources[0]["uri"], "bun://docs");
+        assert_eq!(resources[0]["name"], "Bun Documentation");
+        assert_eq!(resources[0]["mimeType"], "application/json");
     }
 
     #[test]

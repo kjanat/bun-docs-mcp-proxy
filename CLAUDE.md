@@ -126,9 +126,11 @@ Mock HTTP server tests use `mockito` for reliable async test execution.
 
 **Supported Methods**:
 
-- `initialize` - Returns protocol version `2024-11-05`, capabilities, server info
+- `initialize` - Returns protocol version `2024-11-05`, capabilities (tools + resources), server info
 - `tools/list` - Returns single tool: `SearchBun` with `query` string parameter
 - `tools/call` - Forwards to Bun Docs API, extracts `result` from SSE response
+- `resources/list` - Returns single resource: `bun://docs` with Bun Documentation
+- `resources/read` - Reads resource by URI (e.g., `bun://docs?query=Bun.serve`)
 
 **SSE Parsing Logic** (`src/http/mod.rs:68-106`):
 
