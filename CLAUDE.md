@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Rust-based MCP (Model Context Protocol) proxy that bridges stdio-based MCP clients (like Zed) with the HTTP/SSE-based
-Bun documentation server at `https://bun.com/docs/mcp`. Acts as a protocol adapter: receives JSON-RPC 2.0 over stdin,
-forwards to Bun Docs HTTP API, parses SSE responses, and returns JSON-RPC over stdout.
+Rust-based tool with dual modes:
+1. **MCP Server**: Protocol adapter bridging stdio-based MCP clients (like Zed) with HTTP/SSE-based Bun docs API
+2. **CLI Tool**: Direct documentation search with formatted output (JSON/text/markdown) to terminal or file
 
 ## Essential Commands
 
@@ -41,6 +41,25 @@ echo '{"jsonrpc":"2.0","id":1,"method":"resources/list"}' | \
 ./target/release/bun-docs-mcp-proxy
 ```
 
+### CLI Mode
+
+```bash
+# Search and output to terminal (JSON format)
+./target/release/bun-docs-mcp-proxy --search "Bun.serve"
+
+# Plain text format
+./target/release/bun-docs-mcp-proxy -s "HTTP server" -f text
+
+# Markdown format
+./target/release/bun-docs-mcp-proxy -s "WebSocket" -f markdown
+
+# Save to file
+./target/release/bun-docs-mcp-proxy -s "Bun.serve" -o docs.json
+
+# Text format to file
+./target/release/bun-docs-mcp-proxy -s "testing" -f text -o output.txt
+```
+
 ### Cross-Platform Builds
 
 ```bash
@@ -63,8 +82,10 @@ cargo build --release --target x86_64-pc-windows-msvc
 
 **Module Breakdown**:
 
-- `src/main.rs` - Event loop: read stdin → dispatch by method → write stdout. Handles `initialize`, `tools/list`,
-  `tools/call`
+- `src/main.rs` - Dual-mode entrypoint:
+  - **CLI mode** (if `--search` flag): Direct search with formatted output
+  - **MCP mode** (default): Event loop reading stdin → dispatch → write stdout
+  - Handles `initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`
 - `src/protocol/` - JSON-RPC 2.0 types (`JsonRpcRequest`, `JsonRpcResponse`, `JsonRpcError`) with success/error builders
 - `src/transport/` - `StdioTransport`: async line-based stdin reader + stdout writer with flush
 - `src/http/` - `BunDocsClient`: HTTP client with SSE parser. Extracts `result` field from SSE data events
@@ -153,6 +174,26 @@ CI uses `cargo-nextest` for faster test execution and JUnit XML reporting.
 - Breaks on first valid response (ignores subsequent events)
 - Returns error if no valid response found in stream
 
+## CLI Usage
+
+The binary supports both MCP server mode (default) and CLI search mode:
+
+**CLI Flags**:
+- `-s, --search <QUERY>` - Enable CLI mode with search query
+- `-o, --output <FILE>` - Write output to file (default: stdout)
+- `-f, --format <FORMAT>` - Output format: `json` (default), `text`, `markdown`
+- `-h, --help` - Show help
+- `-V, --version` - Show version
+
+**Output Formats**:
+- `json` - Pretty-printed JSON with full API response
+- `text` - Plain text extraction of content (strips metadata)
+- `markdown` - Markdown-formatted with heading and content blocks
+
+**CLI vs MCP Mode**:
+- CLI mode: Activated by `--search` flag, outputs directly, exits after search
+- MCP mode: Default when no `--search` flag, runs event loop on stdin/stdout
+
 ## Common Issues
 
 **Binary size increased**: Check release profile settings in `Cargo.toml`. Verify `strip = true`, `opt-level = "z"`, and
@@ -165,3 +206,5 @@ detection logic.
 require adjustment.
 
 **Cross-compilation fails**: Ensure target toolchain installed with `rustup target add <target-triple>`.
+
+**CLI search returns empty**: Verify network connectivity to `https://bun.com/docs/mcp`. Check RUST_LOG=debug output for errors.

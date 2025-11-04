@@ -8,7 +8,9 @@ fn unknown_arg_exits_nonzero() {
         .assert()
         .failure() // exit code should be non-zero
         .stderr(
-            predicate::str::contains("Unknown argument").or(predicate::str::contains("unknown")),
+            predicate::str::contains("unexpected argument")
+                .or(predicate::str::contains("unknown"))
+                .or(predicate::str::contains("unrecognized")),
         );
 }
 
@@ -23,10 +25,11 @@ fn help_flag_exits_success() {
 #[test]
 fn help_short_flag_exits_success() {
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
-    cmd.arg("-h")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("USAGE").or(predicate::str::contains("FLAGS")));
+    cmd.arg("-h").assert().success().stdout(
+        predicate::str::contains("Usage")
+            .or(predicate::str::contains("Options"))
+            .or(predicate::str::contains("search")),
+    );
 }
 
 #[test]

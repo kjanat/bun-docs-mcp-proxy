@@ -29,7 +29,9 @@ mod protocol;
 mod transport;
 
 use anyhow::Result;
+use clap::{Parser, ValueEnum};
 use protocol::{JsonRpcRequest, JsonRpcResponse};
+use std::fs;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
@@ -38,6 +40,34 @@ const JSONRPC_PARSE_ERROR: i32 = -32700;
 const JSONRPC_INVALID_PARAMS: i32 = -32602;
 const JSONRPC_INTERNAL_ERROR: i32 = -32603;
 const JSONRPC_METHOD_NOT_FOUND: i32 = -32601;
+
+/// Output format for CLI search results
+#[derive(Debug, Clone, ValueEnum)]
+enum OutputFormat {
+    /// JSON format (default)
+    Json,
+    /// Plain text format
+    Text,
+    /// Markdown format
+    Markdown,
+}
+
+/// Bun Docs MCP Proxy - Protocol adapter and CLI for Bun documentation
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// Search query for Bun documentation (enables CLI mode)
+    #[arg(short, long)]
+    search: Option<String>,
+
+    /// Output file path (default: stdout)
+    #[arg(short, long)]
+    output: Option<String>,
+
+    /// Output format
+    #[arg(short, long, value_enum, default_value_t = OutputFormat::Json)]
+    format: OutputFormat,
+}
 
 /// Extract a required string parameter from JSON-RPC params
 fn get_string_param<'a>(params: &'a serde_json::Value, key: &str) -> Result<&'a str, String> {
@@ -68,89 +98,106 @@ fn init_logging() {
         .init();
 }
 
-fn print_version() {
-    println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+/// Format search results as JSON
+fn format_json(result: &serde_json::Value) -> Result<String> {
+    Ok(serde_json::to_string_pretty(result)?)
 }
 
-fn print_help() {
-    println!(
-        "{} {} - {}
+/// Format search results as plain text
+fn format_text(result: &serde_json::Value) -> Result<String> {
+    let mut output = String::new();
 
-USAGE:
-    {} [FLAGS]
-
-FLAGS:
-    -h, --help       Print help information
-    -V, --version    Print version information
-
-DESCRIPTION:
-    MCP (Model Context Protocol) proxy for Bun documentation search.
-
-    Acts as a protocol adapter that receives JSON-RPC 2.0 requests over stdin,
-    forwards them to the Bun documentation HTTP API at https://bun.com/docs/mcp,
-    parses SSE (Server-Sent Events) responses, and returns JSON-RPC responses
-    over stdout.
-
-SUPPORTED METHODS:
-    initialize       Initialize the MCP connection
-    tools/list       List available tools (SearchBun)
-    tools/call       Call a tool with parameters
-    resources/list   List available resources (Bun Documentation)
-    resources/read   Read a resource by URI
-
-ENVIRONMENT VARIABLES:
-    RUST_LOG         Set logging level (debug, info, warn, error)
-
-EXAMPLES:
-    # Start the proxy (typically called by an MCP client)
-    {}
-
-    # Start with debug logging
-    RUST_LOG=debug {}
-
-    # Test tools/call method
-    echo '{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{{\"name\":\"SearchBun\",\"arguments\":{{\"query\":\"Bun.serve\"}}}}}}' | {}",
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION"),
-        env!("CARGO_PKG_DESCRIPTION"),
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_NAME")
-    );
-}
-
-fn handle_args(args: &[String]) -> bool {
-    // Check for flags (skip first arg which is program name)
-    if let Some(arg) = args.get(1) {
-        match arg.as_str() {
-            "-h" | "--help" => {
-                print_help();
-                return true;
-            }
-            "-V" | "--version" => {
-                print_version();
-                return true;
-            }
-            _ => {
-                eprintln!("Unknown argument: {}", arg);
-                eprintln!("Use --help for usage information");
-                std::process::exit(1);
+    if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
+        for item in content {
+            if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+                output.push_str(text);
+                output.push_str("\n\n");
             }
         }
+    } else {
+        output = serde_json::to_string_pretty(result)?;
     }
 
-    false
+    Ok(output)
+}
+
+/// Format search results as markdown
+fn format_markdown(result: &serde_json::Value) -> Result<String> {
+    let mut output = String::new();
+    output.push_str("# Bun Documentation Search Results\n\n");
+
+    if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
+        for item in content {
+            if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+                output.push_str(text);
+                output.push_str("\n\n");
+            }
+        }
+    } else {
+        output.push_str("```json\n");
+        output.push_str(&serde_json::to_string_pretty(result)?);
+        output.push_str("\n```\n");
+    }
+
+    Ok(output)
+}
+
+/// Execute a direct search query in CLI mode
+async fn direct_search(
+    query: &str,
+    format: &OutputFormat,
+    output_path: Option<&str>,
+) -> Result<()> {
+    let client = http::BunDocsClient::new();
+
+    // Build search request
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "SearchBun",
+            "arguments": {
+                "query": query
+            }
+        }
+    });
+
+    // Execute search
+    let result = client.forward_request(request).await?;
+
+    // Extract result field if present
+    let search_result = result.get("result").unwrap_or(&result);
+
+    // Format output
+    let formatted = match format {
+        OutputFormat::Json => format_json(search_result)?,
+        OutputFormat::Text => format_text(search_result)?,
+        OutputFormat::Markdown => format_markdown(search_result)?,
+    };
+
+    // Write output
+    if let Some(path) = output_path {
+        fs::write(path, formatted)?;
+        eprintln!("Output written to: {}", path);
+    } else {
+        println!("{}", formatted);
+    }
+
+    Ok(())
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Handle command-line arguments before starting the proxy
-    let args: Vec<String> = std::env::args().collect();
-    if handle_args(&args) {
-        return Ok(());
+    // Parse CLI arguments
+    let cli = Cli::parse();
+
+    // CLI search mode
+    if let Some(query) = &cli.search {
+        return direct_search(query, &cli.format, cli.output.as_deref()).await;
     }
 
+    // MCP server mode
     init_logging();
     info!("Bun Docs MCP Proxy starting");
 
@@ -769,62 +816,27 @@ mod tests {
     }
 
     #[test]
-    fn test_print_version() {
-        // Test that print_version doesn't panic
-        // Can't easily test output without mocking stdout
-        let result = std::panic::catch_unwind(|| {
-            print_version();
-        });
-        assert!(result.is_ok());
+    fn test_format_json() {
+        let result = serde_json::json!({"content": [{"text": "test", "type": "text"}]});
+        let formatted = format_json(&result).unwrap();
+        assert!(formatted.contains("\"content\""));
+        assert!(formatted.contains("\"text\": \"test\""));
     }
 
     #[test]
-    fn test_print_help() {
-        // Test that print_help doesn't panic
-        let result = std::panic::catch_unwind(|| {
-            print_help();
-        });
-        assert!(result.is_ok());
+    fn test_format_text() {
+        let result = serde_json::json!({"content": [{"text": "test content", "type": "text"}]});
+        let formatted = format_text(&result).unwrap();
+        assert!(formatted.contains("test content"));
+        assert!(!formatted.contains("\"content\""));
     }
 
     #[test]
-    fn test_handle_args_no_args() {
-        // Test with no args (simulate program name only)
-        let args = vec!["program".to_string()];
-        let result = handle_args(&args);
-        assert!(!result); // Should return false when no flags present
-    }
-
-    #[test]
-    fn test_handle_args_help_flag() {
-        // Test --help flag
-        let args = vec!["program".to_string(), "--help".to_string()];
-        let result = handle_args(&args);
-        assert!(result); // Should return true for help flag
-    }
-
-    #[test]
-    fn test_handle_args_help_short_flag() {
-        // Test -h flag
-        let args = vec!["program".to_string(), "-h".to_string()];
-        let result = handle_args(&args);
-        assert!(result); // Should return true for help flag
-    }
-
-    #[test]
-    fn test_handle_args_version_flag() {
-        // Test --version flag
-        let args = vec!["program".to_string(), "--version".to_string()];
-        let result = handle_args(&args);
-        assert!(result); // Should return true for version flag
-    }
-
-    #[test]
-    fn test_handle_args_version_short_flag() {
-        // Test -V flag
-        let args = vec!["program".to_string(), "-V".to_string()];
-        let result = handle_args(&args);
-        assert!(result); // Should return true for version flag
+    fn test_format_markdown() {
+        let result = serde_json::json!({"content": [{"text": "test content", "type": "text"}]});
+        let formatted = format_markdown(&result).unwrap();
+        assert!(formatted.contains("# Bun Documentation Search Results"));
+        assert!(formatted.contains("test content"));
     }
 
     #[test]

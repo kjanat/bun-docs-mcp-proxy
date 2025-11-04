@@ -4,8 +4,7 @@
 [![Release](https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/release.yml/badge.svg)](https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/release.yml)
 [![codecov](https://codecov.io/gh/kjanat/bun-docs-mcp-proxy/graph/badge.svg?token=ySY6HF2Vbx)](https://codecov.io/gh/kjanat/bun-docs-mcp-proxy)
 
-Native Rust proxy for Bun documentation MCP context server. Bridges Zed's stdio-based MCP client with the Bun HTTP MCP
-server at `https://bun.com/docs/mcp`.
+Native Rust tool for accessing Bun documentation. Works as both an MCP server (bridging stdio-based MCP clients like Zed with the Bun HTTP API) and a standalone CLI for direct documentation searches.
 
 ## Features
 
@@ -24,7 +23,25 @@ cargo build --release
 
 The binary will be at [`target/release/bun-docs-mcp-proxy`](./target/release/bun-docs-mcp-proxy).
 
-## Running
+## Usage
+
+### CLI Mode - Direct Documentation Search
+
+```bash
+# Search and output to terminal (JSON format, default)
+./target/release/bun-docs-mcp-proxy --search "Bun.serve"
+
+# Plain text format
+./target/release/bun-docs-mcp-proxy -s "HTTP server" -f text
+
+# Markdown format
+./target/release/bun-docs-mcp-proxy -s "WebSocket" -f markdown
+
+# Save to file
+./target/release/bun-docs-mcp-proxy -s "testing" -o docs.json
+```
+
+### MCP Server Mode (Default)
 
 ```bash
 ./target/release/bun-docs-mcp-proxy
