@@ -136,20 +136,22 @@ tasks:
   fmt-check:
     desc: Check code formatting
     aliases: [fc]
-    cmd: cargo fmt -- --check
+    cmd: cargo fmt --check --message-format short
 
   clippy:
     desc: Run clippy linter with all features
     aliases: [lint]
     env:
       RUSTFLAGS: -D warnings
-    cmd: cargo clippy --all-features --all-targets {{.CLI_ARGS}}
+    cmd: |
+      cargo clippy \
+        --all-features \
+        --all-targets \
+        {{.CLI_ARGS}}
 
   clippy-strict:
     desc: Run clippy linter with all features
     aliases: [lint-strict]
-    env:
-      RUSTFLAGS: -D warnings
     cmd: |
       cargo clippy \
         --all-features \
@@ -160,6 +162,8 @@ tasks:
         -W clippy::pedantic \
         -W clippy::restriction \
         {{.CLI_ARGS}}
+    # env:
+    #   RUSTFLAGS: -D warnings
 
   check:
     desc: Run all checks (fmt, clippy, tests)

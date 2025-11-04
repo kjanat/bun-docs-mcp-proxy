@@ -61,7 +61,7 @@ fn handles_stdin_eof_cleanly() {
 fn handles_invalid_json_gracefully() {
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
     cmd.write_stdin("not valid json at all\n")
-        .timeout(std::time::Duration::from_secs(2))
+        .timeout(core::time::Duration::from_secs(2))
         .assert()
         .stderr(
             predicate::str::contains("parse")
@@ -78,7 +78,7 @@ fn initialize_roundtrip() {
         r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}
 "#,
     )
-    .timeout(std::time::Duration::from_secs(2))
+    .timeout(core::time::Duration::from_secs(2))
     .assert()
     .success()
     .stdout(predicate::str::contains("protocolVersion"))

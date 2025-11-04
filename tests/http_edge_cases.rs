@@ -16,14 +16,14 @@ mod http_test_utils {
 
     impl BunDocsClient {
         pub fn new_with_url(url: String) -> Self {
-            Self {
+            return Self {
                 client: Client::new(),
                 base_url: url,
-            }
+            };
         }
 
         pub async fn forward_request(&self, request: Value) -> Result<Value> {
-            use anyhow::Context;
+            use anyhow::Context as _;
 
             const REQUEST_TIMEOUT_SECS: u64 = 5;
 
@@ -33,7 +33,7 @@ mod http_test_utils {
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json, text/event-stream")
                 .json(&request)
-                .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
+                .timeout(core::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
                 .send()
                 .await
                 .context("Failed to send request to Bun Docs API")?;
@@ -44,29 +44,29 @@ mod http_test_utils {
                 let error_text = response
                     .text()
                     .await
-                    .unwrap_or_else(|_| "unknown error".to_string());
+                    .unwrap_or_else(|_| "unknown error".to_owned());
                 anyhow::bail!("Bun Docs API error: {status} - {error_text}");
             }
 
             let content_type = response
                 .headers()
                 .get("content-type")
-                .and_then(|v| v.to_str().ok())
+                .and_then(|v| return v.to_str().ok())
                 .unwrap_or("");
 
             if content_type.contains("text/event-stream") {
                 return self.parse_sse_response(response).await;
             }
 
-            response
+            return response
                 .json()
                 .await
-                .context("Failed to parse JSON response")
+                .context("Failed to parse JSON response");
         }
 
         async fn parse_sse_response(&self, response: reqwest::Response) -> Result<Value> {
-            use eventsource_stream::Eventsource;
-            use futures::StreamExt;
+            use eventsource_stream::Eventsource as _;
+            use futures::StreamExt as _;
 
             let mut event_stream = response.bytes_stream().eventsource();
 
@@ -84,7 +84,7 @@ mod http_test_utils {
                 }
             }
 
-            Err(anyhow::anyhow!("No valid JSON-RPC response in SSE stream"))
+            return Err(anyhow::anyhow!("No valid JSON-RPC response in SSE stream"));
         }
 
         fn parse_sse_event_data(data: &str) -> Result<Option<Value>> {
@@ -96,9 +96,9 @@ mod http_test_utils {
                 .map_err(|e| anyhow::anyhow!("Failed to parse SSE event data as JSON: {e}"))?;
 
             if parsed.get("result").is_some() || parsed.get("error").is_some() {
-                Ok(Some(parsed))
+                return Ok(Some(parsed));
             } else {
-                Ok(None)
+                return Ok(None);
             }
         }
     }
@@ -109,7 +109,7 @@ use http_test_utils::BunDocsClient;
 #[tokio::test]
 async fn test_forward_request_connection_refused() {
     // Use invalid port that nothing is listening on
-    let client = BunDocsClient::new_with_url("http://localhost:1".to_string());
+    let client = BunDocsClient::new_with_url("http://localhost:1".to_owned());
 
     let request = json!({
         "jsonrpc": "2.0",
@@ -131,9 +131,8 @@ async fn test_forward_request_connection_refused() {
 #[tokio::test]
 async fn test_forward_request_invalid_hostname() {
     // Use invalid hostname that cannot be resolved
-    let client = BunDocsClient::new_with_url(
-        "http://invalid.hostname.that.does.not.exist.local".to_string(),
-    );
+    let client =
+        BunDocsClient::new_with_url("http://invalid.hostname.that.does.not.exist.local".to_owned());
 
     let request = json!({
         "jsonrpc": "2.0",
@@ -154,7 +153,7 @@ async fn test_forward_request_invalid_hostname() {
 #[tokio::test]
 async fn test_forward_request_timeout_with_real_slow_endpoint() {
     // Use httpbingo.org delay endpoint to test timeout (delays 10 seconds, timeout is 5 seconds)
-    let client = BunDocsClient::new_with_url("https://httpbingo.org/delay/10".to_string());
+    let client = BunDocsClient::new_with_url("https://httpbingo.org/delay/10".to_owned());
 
     let request = json!({
         "jsonrpc": "2.0",
@@ -173,7 +172,7 @@ async fn test_forward_request_timeout_with_real_slow_endpoint() {
 #[tokio::test]
 async fn test_forward_request_http_404() {
     // Use httpbingo.org status endpoint to test 404 error
-    let client = BunDocsClient::new_with_url("https://httpbingo.org/status/404".to_string());
+    let client = BunDocsClient::new_with_url("https://httpbingo.org/status/404".to_owned());
 
     let request = json!({
         "jsonrpc": "2.0",
@@ -190,7 +189,7 @@ async fn test_forward_request_http_404() {
 #[tokio::test]
 async fn test_forward_request_http_500() {
     // Use httpbingo.org status endpoint to test 500 error
-    let client = BunDocsClient::new_with_url("https://httpbingo.org/status/500".to_string());
+    let client = BunDocsClient::new_with_url("https://httpbingo.org/status/500".to_owned());
 
     let request = json!({
         "jsonrpc": "2.0",
@@ -207,7 +206,7 @@ async fn test_forward_request_http_500() {
 #[tokio::test]
 async fn test_parse_invalid_json_response() {
     // Use httpbingo.org html endpoint to get non-JSON response
-    let client = BunDocsClient::new_with_url("https://httpbingo.org/html".to_string());
+    let client = BunDocsClient::new_with_url("https://httpbingo.org/html".to_owned());
 
     let request = json!({
         "jsonrpc": "2.0",
@@ -253,7 +252,7 @@ fn test_sse_parsing_logic() {
 
     // Invalid JSON
     let parsed: serde_json::Result<serde_json::Value> = serde_json::from_str(invalid_json);
-    assert!(parsed.is_err());
+    parsed.unwrap_err();
 }
 
 #[test]
@@ -303,7 +302,7 @@ fn test_content_type_header_parsing() {
 
 #[test]
 fn test_timeout_duration() {
-    use std::time::Duration;
+    use core::time::Duration;
 
     const REQUEST_TIMEOUT_SECS: u64 = 5;
     let timeout = Duration::from_secs(REQUEST_TIMEOUT_SECS);
@@ -316,11 +315,11 @@ fn test_timeout_duration() {
 #[test]
 fn test_error_message_fallback_logic() {
     // Test unwrap_or_else logic for error text
-    let ok_result: Result<String, Error> = Ok("error message".to_string());
+    let ok_result: Result<String, Error> = Ok("error message".to_owned());
     let err_result: Result<String, Error> = Err(Error::new(Other, "test error"));
 
-    let fallback1 = Result::unwrap_or_else(ok_result, |_| "unknown error".to_string());
-    let fallback2 = Result::unwrap_or_else(err_result, |_| "unknown error".to_string());
+    let fallback1 = Result::unwrap_or_else(ok_result, |_| "unknown error".to_owned());
+    let fallback2 = Result::unwrap_or_else(err_result, |_| "unknown error".to_owned());
 
     assert_eq!(fallback1, "error message");
     assert_eq!(fallback2, "unknown error");
