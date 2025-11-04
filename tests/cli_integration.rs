@@ -37,16 +37,19 @@ fn cli_search_text_format() {
     assert!(!stdout.contains("\"content\"") || stdout.contains("Bun"));
 }
 
-/// Test markdown format output
+/// Test markdown format output (fetches raw MDX)
 #[test]
 fn cli_search_markdown_format() {
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
     cmd.args(&["--search", "WebSocket", "--format", "markdown"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "# Bun Documentation Search Results",
-        ));
+        .stdout(
+            // Should contain MDX content or URL comment or separator
+            predicate::str::contains("<!--")
+                .or(predicate::str::contains("---"))
+                .or(predicate::str::contains("WebSocket")),
+        );
 }
 
 /// Test file output creation
@@ -68,7 +71,7 @@ fn cli_search_with_output_file() {
     assert!(!content.is_empty());
 }
 
-/// Test markdown file output
+/// Test markdown file output (fetches raw MDX)
 #[test]
 fn cli_search_markdown_to_file() {
     let temp_dir = tempdir().unwrap();
@@ -82,9 +85,12 @@ fn cli_search_markdown_to_file() {
     .assert()
     .success();
 
-    // Verify markdown file content
+    // Verify markdown file contains MDX content or URL comments
     let content = fs::read_to_string(&output_path).unwrap();
-    assert!(content.contains("# Bun Documentation Search Results"));
+    assert!(
+        content.contains("<!--") || content.contains("---") || content.contains("Bun"),
+        "Markdown output should contain MDX content, URL comments, or separators"
+    );
 }
 
 /// Test overwrite warning
@@ -161,9 +167,13 @@ fn cli_search_all_options() {
         .success()
         .stderr(predicate::str::contains("Output written to:"));
 
-    // Verify complete markdown file
+    // Verify complete markdown file contains MDX content
     let content = fs::read_to_string(&output_path).unwrap();
-    assert!(content.contains("# Bun Documentation"));
+    assert!(
+        !content.is_empty()
+            && (content.contains("Bun") || content.contains("<!--") || content.contains("---")),
+        "Markdown output should contain documentation content"
+    );
 }
 
 /// Test that logging works in CLI mode

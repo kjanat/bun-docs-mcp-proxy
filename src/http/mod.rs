@@ -313,6 +313,52 @@ impl BunDocsClient {
 
         json_response.ok_or_else(|| anyhow::anyhow!("No valid JSON-RPC response in SSE stream"))
     }
+
+    /// Fetch a documentation page as raw Markdown/MDX
+    ///
+    /// Sends an HTTP GET request with `Accept: text/markdown` header to retrieve
+    /// the raw MDX source of a documentation page.
+    ///
+    /// # Arguments
+    /// * `url` - The full URL of the documentation page to fetch
+    ///
+    /// # Returns
+    /// Raw Markdown/MDX content as a String
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The HTTP request fails
+    /// - The server returns a non-success status code
+    /// - The response body cannot be read as UTF-8 text
+    pub async fn fetch_doc_markdown(&self, url: &str) -> Result<String> {
+        debug!("Fetching MDX for URL: {}", url);
+
+        let response = self
+            .client
+            .get(url)
+            .header(reqwest::header::ACCEPT, "text/markdown")
+            .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            .send()
+            .await
+            .context("Failed to send request for markdown")?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(anyhow::anyhow!(
+                "Failed to fetch markdown: HTTP {} for URL: {}",
+                status,
+                url
+            ));
+        }
+
+        let text = response
+            .text()
+            .await
+            .context("Failed to read markdown response body")?;
+
+        debug!("Successfully fetched {} bytes of MDX", text.len());
+        Ok(text)
+    }
 }
 
 #[cfg(test)]

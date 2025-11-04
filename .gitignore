@@ -1,5 +1,38 @@
-# Created by https://www.toptal.com/developers/gitignore/api/rust,rust-analyzer,node,linux,windows,macos,zsh
-# Edit at https://www.toptal.com/developers/gitignore?templates=rust,rust-analyzer,node,linux,windows,macos,zsh
+# dependencies (bun install)
+node_modules
+
+# output
+out
+dist
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+_.log
+report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+
+# dotenv environment variable files
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IntelliJ based IDEs
+.idea
+
+# Finder (MacOS) folder config
+.DS_Store
+
 
 ### Linux ###
 *~
@@ -271,8 +304,6 @@ zsdoc/data
 # Zunit tests' output
 /tests/_output/*
 !/tests/_output/.gitkeep
-
-# End of https://www.toptal.com/developers/gitignore/api/rust,rust-analyzer,node,linux,windows,macos,zsh
 
 *local*
 extension.wasm

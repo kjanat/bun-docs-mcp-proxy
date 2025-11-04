@@ -137,6 +137,37 @@ fn extract_content_texts(result: &serde_json::Value) -> Vec<&str> {
         .unwrap_or_default()
 }
 
+/// Represents a documentation entry with URL and fallback text
+struct DocEntry<'a> {
+    url: Option<String>,
+    text: &'a str,
+}
+
+/// Extract URLs and text from content for markdown fetching
+///
+/// Parses "Link: URL" patterns from content[].text fields and returns
+/// structured entries with both the URL (if found) and the full text as fallback.
+fn extract_doc_entries(result: &serde_json::Value) -> Vec<DocEntry<'_>> {
+    let texts = extract_content_texts(result);
+
+    texts
+        .into_iter()
+        .map(|text| {
+            // Parse "Link: <URL>" pattern
+            let url = text.lines().find_map(|line| {
+                let trimmed = line.trim();
+                if trimmed.starts_with("Link: ") {
+                    Some(trimmed.strip_prefix("Link: ").unwrap().trim().to_string())
+                } else {
+                    None
+                }
+            });
+
+            DocEntry { url, text }
+        })
+        .collect()
+}
+
 /// Format search results as JSON
 fn format_json(result: &serde_json::Value) -> Result<String> {
     Ok(serde_json::to_string_pretty(result)?)
@@ -153,25 +184,57 @@ fn format_text(result: &serde_json::Value) -> Result<String> {
     }
 }
 
-/// Format search results as markdown
-fn format_markdown(result: &serde_json::Value) -> Result<String> {
-    let mut output = String::new();
-    output.push_str("# Bun Documentation Search Results\n\n");
+/// Format search results as markdown with raw MDX fetching
+///
+/// Extracts URLs from search results, fetches raw MDX source from each URL
+/// with `Accept: text/markdown` header, and aggregates the content.
+///
+/// On fetch failure, falls back to the original text content from search results.
+async fn format_markdown(
+    result: &serde_json::Value,
+    client: &http::BunDocsClient,
+) -> Result<String> {
+    let doc_entries = extract_doc_entries(result);
 
-    let texts = extract_content_texts(result);
-
-    if !texts.is_empty() {
-        for text in texts {
-            output.push_str(text);
-            output.push_str("\n\n");
-        }
-    } else {
+    if doc_entries.is_empty() {
+        // No content found, fallback to JSON display
+        let mut output = String::new();
         output.push_str("```json\n");
         output.push_str(&serde_json::to_string_pretty(result)?);
         output.push_str("\n```\n");
+        return Ok(output);
     }
 
-    Ok(output)
+    let mut mdx_parts = Vec::new();
+
+    for entry in doc_entries {
+        if let Some(url) = entry.url {
+            // Try to fetch MDX from the URL
+            match client.fetch_doc_markdown(&url).await {
+                Ok(mdx) => {
+                    // Success: include URL comment and MDX content
+                    let mut part = String::new();
+                    part.push_str(&format!("<!-- Source: {} -->\n\n", url));
+                    part.push_str(&mdx);
+                    mdx_parts.push(part);
+                }
+                Err(e) => {
+                    // Error: include error comment and fallback to original text
+                    let mut part = String::new();
+                    part.push_str(&format!("<!-- Error: {} -->\n\n", e));
+                    part.push_str(entry.text);
+                    mdx_parts.push(part);
+                    eprintln!("Failed to fetch MDX from {}: {}", url, e);
+                }
+            }
+        } else {
+            // No URL found, use original text content
+            mdx_parts.push(entry.text.to_string());
+        }
+    }
+
+    // Join with horizontal rules and two newlines
+    Ok(mdx_parts.join("\n\n---\n\n"))
 }
 
 /// Validate output path to prevent directory traversal attacks
@@ -241,7 +304,7 @@ async fn direct_search(
     let formatted = match format {
         OutputFormat::Json => format_json(search_result)?,
         OutputFormat::Text => format_text(search_result)?,
-        OutputFormat::Markdown => format_markdown(search_result)?,
+        OutputFormat::Markdown => format_markdown(search_result, &client).await?,
     };
 
     // Write output
@@ -935,43 +998,82 @@ mod tests {
         assert!(formatted.contains("second item"));
     }
 
-    #[test]
-    fn test_format_markdown() {
+    #[tokio::test]
+    async fn test_format_markdown_no_url() {
+        // Test content without URL - should just return the text
         let result = serde_json::json!({"content": [{"text": "test content", "type": "text"}]});
-        let formatted = format_markdown(&result).unwrap();
-        assert!(formatted.contains("# Bun Documentation Search Results"));
+        let client = http::BunDocsClient::new();
+        let formatted = format_markdown(&result, &client).await.unwrap();
         assert!(formatted.contains("test content"));
+        assert!(!formatted.contains("<!--")); // No URL comment
     }
 
-    #[test]
-    fn test_format_markdown_no_content() {
+    #[tokio::test]
+    async fn test_format_markdown_no_content() {
+        // Test fallback to JSON when no content array
         let result = serde_json::json!({"other": "data"});
-        let formatted = format_markdown(&result).unwrap();
-        assert!(formatted.contains("# Bun Documentation Search Results"));
+        let client = http::BunDocsClient::new();
+        let formatted = format_markdown(&result, &client).await.unwrap();
         assert!(formatted.contains("```json"));
         assert!(formatted.contains("\"other\""));
     }
 
-    #[test]
-    fn test_format_markdown_multiple_items() {
+    #[tokio::test]
+    async fn test_format_markdown_multiple_items_no_url() {
+        // Test multiple items without URLs
         let result = serde_json::json!({"content": [
-            {"text": "# First Section", "type": "text"},
-            {"text": "## Second Section", "type": "text"}
+            {"text": "First Section", "type": "text"},
+            {"text": "Second Section", "type": "text"}
         ]});
-        let formatted = format_markdown(&result).unwrap();
-        assert!(formatted.contains("# Bun Documentation Search Results"));
-        assert!(formatted.contains("# First Section"));
-        assert!(formatted.contains("## Second Section"));
+        let client = http::BunDocsClient::new();
+        let formatted = format_markdown(&result, &client).await.unwrap();
+        assert!(formatted.contains("First Section"));
+        assert!(formatted.contains("Second Section"));
+        assert!(formatted.contains("\n\n---\n\n")); // Horizontal rule separator
+    }
+
+    #[tokio::test]
+    async fn test_format_markdown_empty_content() {
+        // Test empty content array falls back to JSON
+        let result = serde_json::json!({"content": []});
+        let client = http::BunDocsClient::new();
+        let formatted = format_markdown(&result, &client).await.unwrap();
+        assert!(formatted.contains("```json"));
+        assert!(formatted.contains("\"content\": []"));
     }
 
     #[test]
-    fn test_format_markdown_empty_content() {
+    fn test_extract_doc_entries_with_url() {
+        // Test URL extraction from content
+        let result = serde_json::json!({"content": [{
+            "text": "Title: Test\nLink: https://example.com/page\nContent: Some content",
+            "type": "text"
+        }]});
+        let entries = extract_doc_entries(&result);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].url.as_ref().unwrap(), "https://example.com/page");
+        assert!(entries[0].text.contains("Title: Test"));
+    }
+
+    #[test]
+    fn test_extract_doc_entries_without_url() {
+        // Test content without URL
+        let result = serde_json::json!({"content": [{
+            "text": "Just some text without a link",
+            "type": "text"
+        }]});
+        let entries = extract_doc_entries(&result);
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].url.is_none());
+        assert_eq!(entries[0].text, "Just some text without a link");
+    }
+
+    #[test]
+    fn test_extract_doc_entries_empty() {
+        // Test empty content
         let result = serde_json::json!({"content": []});
-        let formatted = format_markdown(&result).unwrap();
-        assert!(formatted.contains("# Bun Documentation Search Results"));
-        // Empty content array falls back to JSON display
-        assert!(formatted.contains("```json"));
-        assert!(formatted.contains("\"content\": []"));
+        let entries = extract_doc_entries(&result);
+        assert_eq!(entries.len(), 0);
     }
 
     #[test]
@@ -1042,10 +1144,11 @@ mod tests {
         assert!(formatted.contains("\"content\": null"));
     }
 
-    #[test]
-    fn test_format_markdown_with_null_content() {
+    #[tokio::test]
+    async fn test_format_markdown_with_null_content() {
         let result = serde_json::json!({"content": null});
-        let formatted = format_markdown(&result).unwrap();
+        let client = http::BunDocsClient::new();
+        let formatted = format_markdown(&result, &client).await.unwrap();
         assert!(formatted.contains("```json"));
         assert!(formatted.contains("null"));
     }
@@ -1136,9 +1239,10 @@ mod tests {
         // Verify file was created
         assert!(output_path.exists());
 
-        // Read and verify markdown format
+        // Read and verify markdown content (may include URL comments or MDX)
         let content = std::fs::read_to_string(&output_path).unwrap();
-        assert!(content.contains("# Bun Documentation Search Results"));
+        assert!(!content.is_empty(), "Markdown output should not be empty");
+        // The content could be raw MDX with URL comments or fallback text
 
         // Cleanup
         let _ = std::fs::remove_file(&output_path);

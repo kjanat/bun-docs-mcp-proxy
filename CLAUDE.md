@@ -78,6 +78,37 @@ echo '{"jsonrpc":"2.0","id":1,"method":"resources/list"}' | \
 ./target/release/bun-docs-mcp-proxy
 ```
 
+### CLI Search Mode
+
+The proxy can operate in CLI mode for direct documentation searches with various output formats:
+
+```bash
+# Search with default JSON output
+bun-docs-mcp-proxy --search "Bun.serve"
+
+# Save results as markdown (fetches raw MDX sources)
+bun-docs-mcp-proxy -s "HTTP server" -f markdown -o results.md
+
+# Export as JSON for processing
+bun-docs-mcp-proxy --search "WebSocket" --format json --output ws-docs.json
+
+# Plain text output
+bun-docs-mcp-proxy -s "test" -f text
+```
+
+**Output Formats**:
+
+- **JSON** (`--format json`): Structured data export, pretty-printed for readability
+- **Text** (`--format text`): Plain text extraction from search results
+- **Markdown** (`--format markdown`): **Fetches raw MDX source files** from documentation URLs
+  - Parses `Link:` fields from search results
+  - Makes HTTP GET requests with `Accept: text/markdown` header
+  - Aggregates multiple documents with `---` separators
+  - Includes `<!-- Source: URL -->` comments for traceability
+  - Falls back to original text if fetch fails (with `<!-- Error: ... -->` comment)
+
+**Breaking Change (v0.3.0)**: The markdown format now fetches raw MDX sources instead of just formatting search result text. This provides access to the full documentation content including MDX components.
+
 ### Cross-Platform Builds
 
 ```bash
