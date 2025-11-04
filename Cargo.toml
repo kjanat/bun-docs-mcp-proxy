@@ -9,6 +9,27 @@ homepage = "https://github.com/kjanat/bun-docs-mcp-proxy"
 keywords = ["mcp", "bun", "documentation", "proxy", "json-rpc"]
 categories = ["command-line-utilities", "development-tools"]
 
+[package.metadata.deb]
+maintainer = "kjanat"
+copyright = "2025, kjanat <https://github.com/kjanat>"
+license-file = ["LICENSE", "4"]
+extended-description = """\
+Native Rust proxy for Bun documentation MCP context server. \
+Bridges stdio-based MCP clients with the Bun HTTP MCP server at https://bun.com/docs/mcp. \
+\
+Features zero runtime dependencies, 2.7 MB binary size, 4ms cold start, \
+and comprehensive error handling."""
+depends = "$auto"
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/bun-docs-mcp-proxy", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/bun-docs-mcp-proxy/", "644"],
+]
+
+[package.metadata.aur]
+depends = []
+
 [dependencies]
 anyhow = "1.0"
 eventsource-stream = "0.2"
