@@ -4,6 +4,10 @@ version = "0.2.1"
 edition = "2024"
 description = "MCP proxy for Bun documentation search"
 license = "MIT"
+repository = "https://github.com/kjanat/bun-docs-mcp-proxy"
+homepage = "https://github.com/kjanat/bun-docs-mcp-proxy"
+keywords = ["mcp", "bun", "documentation", "proxy", "json-rpc"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 anyhow = "1.0"
@@ -36,3 +40,8 @@ strip = true  # Remove debug symbols
 lto = true  # Link-time optimization
 panic = "abort"  # Smaller binary
 codegen-units = 1  # Better optimization
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.{ archive-format }"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
