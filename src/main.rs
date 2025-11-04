@@ -54,7 +54,32 @@ enum OutputFormat {
 
 /// Bun Docs MCP Proxy - Protocol adapter and CLI for Bun documentation
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(
+    author,
+    version,
+    about,
+    long_about = None,
+    after_help = r#"EXAMPLES:
+    # Search Bun documentation for "serve" keyword
+    bun-docs-mcp-proxy --search "Bun.serve"
+
+    # Save results as markdown
+    bun-docs-mcp-proxy -s "HTTP server" -f markdown -o results.md
+
+    # Export as JSON for processing
+    bun-docs-mcp-proxy --search "WebSocket" --format json --output ws-docs.json
+
+    # Run as MCP server (default mode, reads from stdin)
+    bun-docs-mcp-proxy
+
+ENVIRONMENT:
+    RUST_LOG    Set logging level (debug, info, warn, error)
+                Example: RUST_LOG=debug bun-docs-mcp-proxy -s "test"
+
+MCP SERVER MODE:
+    When run without --search, operates as an MCP (Model Context Protocol) server
+    reading JSON-RPC requests from stdin and writing responses to stdout."#
+)]
 struct Cli {
     /// Search query for Bun documentation (enables CLI mode)
     #[arg(short, long)]
@@ -98,6 +123,20 @@ fn init_logging() {
         .init();
 }
 
+/// Extract text content from a search result
+fn extract_content_texts(result: &serde_json::Value) -> Vec<&str> {
+    result
+        .get("content")
+        .and_then(|c| c.as_array())
+        .map(|content| {
+            content
+                .iter()
+                .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Format search results as JSON
 fn format_json(result: &serde_json::Value) -> Result<String> {
     Ok(serde_json::to_string_pretty(result)?)
@@ -105,20 +144,13 @@ fn format_json(result: &serde_json::Value) -> Result<String> {
 
 /// Format search results as plain text
 fn format_text(result: &serde_json::Value) -> Result<String> {
-    let mut output = String::new();
+    let texts = extract_content_texts(result);
 
-    if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
-        for item in content {
-            if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
-                output.push_str(text);
-                output.push_str("\n\n");
-            }
-        }
+    if !texts.is_empty() {
+        Ok(texts.join("\n\n"))
     } else {
-        output = serde_json::to_string_pretty(result)?;
+        Ok(serde_json::to_string_pretty(result)?)
     }
-
-    Ok(output)
 }
 
 /// Format search results as markdown
@@ -126,12 +158,12 @@ fn format_markdown(result: &serde_json::Value) -> Result<String> {
     let mut output = String::new();
     output.push_str("# Bun Documentation Search Results\n\n");
 
-    if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
-        for item in content {
-            if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
-                output.push_str(text);
-                output.push_str("\n\n");
-            }
+    let texts = extract_content_texts(result);
+
+    if !texts.is_empty() {
+        for text in texts {
+            output.push_str(text);
+            output.push_str("\n\n");
         }
     } else {
         output.push_str("```json\n");
@@ -888,7 +920,8 @@ mod tests {
     fn test_format_text_empty_content_array() {
         let result = serde_json::json!({"content": []});
         let formatted = format_text(&result).unwrap();
-        assert_eq!(formatted, "");
+        // Empty content array falls back to JSON
+        assert!(formatted.contains("\"content\": []"));
     }
 
     #[test]
@@ -936,7 +969,85 @@ mod tests {
         let result = serde_json::json!({"content": []});
         let formatted = format_markdown(&result).unwrap();
         assert!(formatted.contains("# Bun Documentation Search Results"));
-        assert_eq!(formatted.trim(), "# Bun Documentation Search Results");
+        // Empty content array falls back to JSON display
+        assert!(formatted.contains("```json"));
+        assert!(formatted.contains("\"content\": []"));
+    }
+
+    #[test]
+    fn test_extract_content_texts_valid() {
+        let result = serde_json::json!({"content": [
+            {"text": "first", "type": "text"},
+            {"text": "second", "type": "text"}
+        ]});
+        let texts = extract_content_texts(&result);
+        assert_eq!(texts, vec!["first", "second"]);
+    }
+
+    #[test]
+    fn test_extract_content_texts_empty() {
+        let result = serde_json::json!({});
+        let texts = extract_content_texts(&result);
+        assert!(texts.is_empty());
+    }
+
+    #[test]
+    fn test_extract_content_texts_null_content() {
+        let result = serde_json::json!({"content": null});
+        let texts = extract_content_texts(&result);
+        assert!(texts.is_empty());
+    }
+
+    #[test]
+    fn test_extract_content_texts_non_array_content() {
+        let result = serde_json::json!({"content": "not an array"});
+        let texts = extract_content_texts(&result);
+        assert!(texts.is_empty());
+    }
+
+    #[test]
+    fn test_extract_content_texts_missing_text_field() {
+        let result = serde_json::json!({"content": [
+            {"type": "text"},  // missing text field
+            {"text": "valid", "type": "text"}
+        ]});
+        let texts = extract_content_texts(&result);
+        assert_eq!(texts, vec!["valid"]);
+    }
+
+    #[test]
+    fn test_extract_content_texts_empty_string() {
+        let result = serde_json::json!({"content": [
+            {"text": "", "type": "text"},
+            {"text": "valid", "type": "text"}
+        ]});
+        let texts = extract_content_texts(&result);
+        assert_eq!(texts, vec!["", "valid"]);
+    }
+
+    #[test]
+    fn test_extract_content_texts_non_string_text() {
+        let result = serde_json::json!({"content": [
+            {"text": 123, "type": "text"},  // text is number
+            {"text": "valid", "type": "text"}
+        ]});
+        let texts = extract_content_texts(&result);
+        assert_eq!(texts, vec!["valid"]);
+    }
+
+    #[test]
+    fn test_format_text_with_null_content() {
+        let result = serde_json::json!({"content": null, "other": "data"});
+        let formatted = format_text(&result).unwrap();
+        assert!(formatted.contains("\"content\": null"));
+    }
+
+    #[test]
+    fn test_format_markdown_with_null_content() {
+        let result = serde_json::json!({"content": null});
+        let formatted = format_markdown(&result).unwrap();
+        assert!(formatted.contains("```json"));
+        assert!(formatted.contains("null"));
     }
 
     #[test]

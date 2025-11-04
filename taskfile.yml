@@ -43,7 +43,11 @@ tasks:
   build-release:
     desc: Build optimized release binary
     aliases: [br, release]
-    cmd: cargo build --release
+    cmds:
+      - cargo build --release
+      - defer: >
+          echo "Built {{.BINARY_NAME}} version {{.CURRENT_VERSION}} (commit {{.COMMIT_HASH}}) at {{.BUILD_TIME}}";
+          echo "Binary: ./{{.BUILD_DIR}}/{{.BINARY_NAME}}"
     sources:
       - src/**/*.rs
       - Cargo.toml
