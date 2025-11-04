@@ -10,11 +10,41 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  lint:
+    name: Pre-release Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-features --all-targets
+
   build:
     name: Build ${{ matrix.platform.target }}
+    needs: lint
     runs-on: ${{ matrix.platform.os }}
     permissions:
       contents: read
+      id-token: write
+      attestations: write
+    env:
+      RUSTFLAGS: -D warnings
     strategy:
       fail-fast: false
       matrix:
@@ -76,29 +106,20 @@ jobs:
         with:
           targets: ${{ matrix.platform.target }}
 
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.platform.target }}
+
+      - name: Install Zig
+        if: matrix.platform.cross
+        uses: goto-bus-stop/setup-zig@v2
+
       - name: Install cargo-zigbuild
         if: matrix.platform.cross
-        run: |
-          cargo install cargo-zigbuild
-          pip3 install ziglang
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: taiki-e/install-action@v2
         with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache cargo index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache cargo build
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          tool: cargo-zigbuild
 
       - name: Build with cargo-zigbuild
         if: matrix.platform.cross
@@ -113,32 +134,38 @@ jobs:
         run: |
           cd target/${{ matrix.platform.target }}/release
           tar czf bun-docs-mcp-proxy-${{ matrix.platform.name }}.tar.gz bun-docs-mcp-proxy
-          sha256sum bun-docs-mcp-proxy-${{ matrix.platform.name }}.tar.gz > bun-docs-mcp-proxy-${{ matrix.platform.name }}.tar.gz.sha256
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         run: |
           cd target/${{ matrix.platform.target }}/release
           7z a bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip bun-docs-mcp-proxy.exe
-          certutil -hashfile bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip SHA256 > bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip.sha256
+
+      - name: Generate attestation (Linux/macOS)
+        if: runner.os != 'Windows'
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: "target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.tar.gz"
+
+      - name: Generate attestation (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: "target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip"
 
       - name: Upload artifact (Linux/macOS)
         if: runner.os != 'Windows'
         uses: actions/upload-artifact@v5
         with:
           name: bun-docs-mcp-proxy-${{ matrix.platform.name }}
-          path: |
-            target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.tar.gz
-            target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.tar.gz.sha256
+          path: target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.tar.gz
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v5
         with:
           name: bun-docs-mcp-proxy-${{ matrix.platform.name }}
-          path: |
-            target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip
-            target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip.sha256
+          path: target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip
 
   release:
     name: Create Release
@@ -156,6 +183,13 @@ jobs:
         with:
           path: artifacts
 
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          # Generate SHA256SUMS file
+          find . -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec sha256sum {} \; | sed 's|./[^/]*/||' > SHA256SUMS
+          cat SHA256SUMS
+
       - name: Create Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -163,7 +197,7 @@ jobs:
           # Extract version from tag
           VERSION=${GITHUB_REF#refs/tags/}
 
-          # Create release notes
+          # Create release notes with embedded checksums
           cat > release_notes.md << 'EOF'
           ## Bun Docs MCP Proxy ${{ github.ref_name }}
 
@@ -199,14 +233,42 @@ jobs:
 
           ### Verification
 
-          SHA256 checksums are provided for each binary. Verify with:
+          #### Automated Verification (Recommended)
+
+          All binaries are signed with GitHub's attestation system for supply chain security:
+
+          ```bash
+          # Install GitHub CLI if needed
+          # gh --version
+
+          # Verify attestation (replace with your platform's filename)
+          gh attestation verify bun-docs-mcp-proxy-linux-x86_64.tar.gz --owner kjanat
+          ```
+
+          #### Manual Verification
+
+          Download `SHA256SUMS` and verify checksums:
 
           ```bash
           # Linux/macOS
-          sha256sum -c bun-docs-mcp-proxy-*.sha256
+          sha256sum -c SHA256SUMS
+
+          # Or verify single file
+          sha256sum bun-docs-mcp-proxy-linux-x86_64.tar.gz
 
           # Windows (PowerShell)
-          Get-FileHash bun-docs-mcp-proxy-*.zip -Algorithm SHA256
+          Get-FileHash bun-docs-mcp-proxy-windows-x86_64.zip -Algorithm SHA256
+          ```
+
+          #### SHA256 Checksums
+
+          ```
+          EOF
+
+          # Append checksums to release notes
+          cat artifacts/SHA256SUMS >> release_notes.md
+
+          cat >> release_notes.md << 'EOF'
           ```
           EOF
 
@@ -215,6 +277,5 @@ jobs:
             --title "Release ${VERSION}" \
             --notes-file release_notes.md \
             artifacts/*/*.tar.gz \
-            artifacts/*/*.tar.gz.sha256 \
             artifacts/*/*.zip \
-            artifacts/*/*.zip.sha256
+            artifacts/SHA256SUMS
