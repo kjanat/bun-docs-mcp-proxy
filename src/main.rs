@@ -1032,4 +1032,53 @@ mod tests {
         // Cleanup
         let _ = std::fs::remove_file(&output_path);
     }
+
+    #[test]
+    fn test_validate_output_path_valid() {
+        assert!(validate_output_path("/tmp/output.json").is_ok());
+        assert!(validate_output_path("output.json").is_ok());
+        assert!(validate_output_path("./output.json").is_ok());
+        assert!(validate_output_path("subdir/output.json").is_ok());
+    }
+
+    #[test]
+    fn test_validate_output_path_directory_traversal() {
+        assert!(validate_output_path("../output.json").is_err());
+        assert!(validate_output_path("subdir/../output.json").is_err());
+        assert!(validate_output_path("../../etc/passwd").is_err());
+    }
+
+    #[tokio::test]
+    async fn test_direct_search_invalid_output_path() {
+        let result = direct_search("test", &OutputFormat::Json, Some("../output.json")).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("directory traversal")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_direct_search_file_overwrite() {
+        let temp_dir = std::env::temp_dir();
+        let output_path = temp_dir.join("test_overwrite.json");
+        let output_str = output_path.to_str().unwrap();
+
+        // Create existing file
+        fs::write(&output_path, "existing content").unwrap();
+        assert!(output_path.exists());
+
+        // Should overwrite with warning
+        let result = direct_search("test", &OutputFormat::Json, Some(output_str)).await;
+        assert!(result.is_ok());
+
+        // Verify new content
+        let content = std::fs::read_to_string(&output_path).unwrap();
+        assert!(!content.contains("existing content"));
+
+        // Cleanup
+        let _ = std::fs::remove_file(&output_path);
+    }
 }
