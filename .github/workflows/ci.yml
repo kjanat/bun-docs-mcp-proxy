@@ -27,19 +27,14 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Build
-        run: cargo build --all-features --all-targets
-
-      - name: Run unit tests
-        run: cargo test --all-features
+      - name: Install Task
+        uses: go-task/setup-task@v1
 
       - name: Install test dependencies
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Run integration tests
-        run: |
-          cargo build --release
-          bash test-proxy.sh
+      - name: Run CI checks
+        run: task --yes ci
 
   coverage:
     name: Code Coverage
@@ -59,18 +54,18 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
 
+      - name: Install Task
+        uses: go-task/setup-task@v1
+
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
 
-      - name: Run tests and generate JUnit report
-        run: cargo nextest run --all-features --workspace --profile ci
+      - name: Run coverage workflow
+        run: task --yes ci-coverage
         continue-on-error: true
-
-      - name: Generate coverage
-        run: cargo llvm-cov nextest --all-features --workspace --codecov --output-path codecov.json
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -104,11 +99,11 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Check formatting
-        run: cargo fmt -- --check
+      - name: Install Task
+        uses: go-task/setup-task@v1
 
-      - name: Clippy
-        run: cargo clippy --all-features --all-targets
+      - name: Run lint checks
+        run: task --yes ci-lint
 
   build-matrix:
     name: Build ${{ matrix.platform.target }}

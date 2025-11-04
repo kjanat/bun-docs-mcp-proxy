@@ -290,3 +290,8 @@ lcov.info
 junit.xml
 
 .playwright-mcp/
+
+SHA256SUMS
+SHA256SUMS.tmp
+
+.task/

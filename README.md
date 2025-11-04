@@ -1,8 +1,8 @@
 # Bun Docs MCP Proxy
 
-[![CI](https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/ci.yml)
-[![Release](https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/release.yml/badge.svg)](https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/release.yml)
-[![codecov](https://codecov.io/gh/kjanat/bun-docs-mcp-proxy/graph/badge.svg?token=ySY6HF2Vbx)](https://codecov.io/gh/kjanat/bun-docs-mcp-proxy)
+[![CI](https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/ci.yml/badge.svg?branch=master)][ci.yml]
+[![Release](https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/release.yml/badge.svg)][release.yml]
+[![codecov](https://codecov.io/gh/kjanat/bun-docs-mcp-proxy/graph/badge.svg?token=ySY6HF2Vbx)][codecov]
 
 Native Rust proxy for Bun documentation MCP context server. Bridges Zed's stdio-based MCP client with the Bun HTTP MCP
 server at `https://bun.com/docs/mcp`.
@@ -22,7 +22,7 @@ server at `https://bun.com/docs/mcp`.
 cargo build --release
 ```
 
-The binary will be at [`target/release/bun-docs-mcp-proxy`](./target/release/bun-docs-mcp-proxy).
+The binary will be at [`target/release/bun-docs-mcp-proxy`][target-output].
 
 ## Running
 
@@ -292,7 +292,7 @@ cargo build --release --target x86_64-pc-windows-msvc
 
 ## License
 
-[MIT](./LICENSE)
+[MIT][license]
 
 ## Development
 
@@ -302,7 +302,17 @@ Built with:
 - Cargo
 - Standard async Rust ecosystem
 
-See [docs/protocol-analysis.md](https://github.com/kjanat/bun-docs-mcp-zed/blob/16daa944a9fb12d58a19c23751f5b4bb18fb3a68/docs/protocol-analysis.md)
+See [docs/protocol-analysis.md][protocol-analysis.md]
 for protocol details.  
-See [docs/rmcp-evaluation.md](https://github.com/kjanat/bun-docs-mcp-zed/blob/16daa944a9fb12d58a19c23751f5b4bb18fb3a68/docs/rmcp-evaluation.md)
+See [docs/rmcp-evaluation.md][rmcp-evaluation.md]
 for architecture decisions.
+
+<!--Link defs-->
+
+[ci.yml]: https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/ci.yml
+[codecov]: https://codecov.io/gh/kjanat/bun-docs-mcp-proxy
+[license]: ./LICENSE
+[protocol-analysis.md]: https://github.com/kjanat/bun-docs-mcp-zed/blob/16daa944a9fb12d58a19c23751f5b4bb18fb3a68/docs/protocol-analysis.md
+[release.yml]: https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/release.yml
+[rmcp-evaluation.md]: https://github.com/kjanat/bun-docs-mcp-zed/blob/16daa944a9fb12d58a19c23751f5b4bb18fb3a68/docs/rmcp-evaluation.md
+[target-output]: ./target/release/bun-docs-mcp-proxy

@@ -10,7 +10,44 @@ forwards to Bun Docs HTTP API, parses SSE responses, and returns JSON-RPC over s
 
 ## Essential Commands
 
-### Build & Test
+### Task-based Workflow (Recommended)
+
+This project uses [Task](https://taskfile.dev) for build automation with GitHub Actions integration.
+
+```bash
+# Quick start - Common tasks
+task br          # Build release binary
+task t           # Run all tests
+task c           # Run all checks (fmt + clippy + tests)
+task cov         # Generate HTML coverage report
+
+# CI simulation (matches GitHub Actions)
+task ci          # Run CI checks locally
+task ci-lint     # Run lint checks
+task ci-coverage # Run coverage workflow
+
+# Development
+task dev         # Watch mode (auto-rebuild on changes)
+task run         # Run proxy in debug mode
+
+# Version management (with safety prompts)
+task bump-patch  # Bump patch version (0.2.1 → 0.2.2)
+task bump-minor  # Bump minor version (0.2.1 → 0.3.0) [prompted]
+task bump-major  # Bump major version (0.2.1 → 1.0.0) [prompted]
+
+# List all available tasks
+task --list-all
+```
+
+**CI Environment**: In CI/CD pipelines, use `--yes` flag to skip prompts:
+```bash
+task --yes clean        # Auto-confirm in CI
+task --yes bump-major   # Skip breaking change prompt
+```
+
+**GitHub Actions Integration**: Tasks automatically use collapsible output groups (`::group::`) in GitHub Actions for cleaner CI logs.
+
+### Build & Test (Raw Commands)
 
 ```bash
 # Build optimized release binary
@@ -19,11 +56,11 @@ cargo build --release
 # Run all tests
 cargo test
 
-# Run tests with Makefile
-make test
+# Run tests with Task
+task t
 
 # Generate coverage report (uses cargo-llvm-cov)
-make coverage
+task cov
 
 # Run with debug logging
 RUST_LOG=debug ./target/release/bun-docs-mcp-proxy
@@ -114,19 +151,17 @@ cargo build --release --target x86_64-pc-windows-msvc
 ### Running Tests
 
 ```bash
-# All tests
+# With Task (Recommended)
+task t           # Run all tests
+task tu          # Run unit tests only
+task ti          # Run integration tests only
+task tn          # Run with nextest (faster, JUnit output)
+task cov         # Generate HTML coverage report
+task covt        # Show coverage summary in terminal
+
+# Raw commands
 cargo test
-
-# With Makefile
 make test
-
-# Coverage report (uses cargo-llvm-cov)
-make coverage
-
-# Coverage summary
-make coverage-text
-
-# Run with cargo-nextest (faster test runner with JUnit output)
 cargo nextest run --all-features --workspace --profile ci
 # JUnit report saved to target/nextest/ci/junit.xml
 ```
@@ -165,3 +200,14 @@ detection logic.
 require adjustment.
 
 **Cross-compilation fails**: Ensure target toolchain installed with `rustup target add <target-triple>`.
+
+**CLI search returns empty**: Verify network connectivity to `https://bun.com/docs/mcp`. Check RUST_LOG=debug output for errors.
+
+**Task prompts fail in CI**: Tasks with `prompt:` (clean, bump-major, bump-minor, build-all-*) require `--yes` flag in non-interactive environments:
+```bash
+# CI/CD usage
+task --yes clean
+task --yes bump-major
+```
+
+**GitHub Actions logs verbose**: Task automatically groups output using `::group::` syntax. Expand/collapse groups in Actions UI for cleaner logs.

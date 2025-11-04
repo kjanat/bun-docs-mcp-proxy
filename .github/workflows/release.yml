@@ -29,11 +29,11 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Check formatting
-        run: cargo fmt -- --check
+      - name: Install Task
+        uses: go-task/setup-task@v1
 
-      - name: Clippy
-        run: cargo clippy --all-features --all-targets
+      - name: Run lint checks
+        run: task --yes ci-lint
 
   build:
     name: Build ${{ matrix.platform.target }}
@@ -110,6 +110,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.platform.target }}
+
+      - name: Install Task
+        uses: go-task/setup-task@v1
 
       - name: Install Zig
         if: matrix.platform.cross
