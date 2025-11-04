@@ -125,10 +125,15 @@ make coverage
 
 # Coverage summary
 make coverage-text
+
+# Run with cargo-nextest (faster test runner with JUnit output)
+cargo nextest run --all-features --workspace --profile ci
+# JUnit report saved to target/nextest/ci/junit.xml
 ```
 
 Tests use `cargo-llvm-cov` (not tarpaulin) for accurate async coverage.
 Mock HTTP server tests use `mockito` for reliable async test execution.
+CI uses `cargo-nextest` for faster test execution and JUnit XML reporting.
 
 ## Protocol Implementation
 

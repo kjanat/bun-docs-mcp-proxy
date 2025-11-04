@@ -1,0 +1,7 @@
+# Nextest configuration
+# See https://nexte.st/book/configuration.html
+# See https://nexte.st/docs/machine-readable/junit/
+
+[profile.ci.junit]
+path = "junit.xml"
+report-name = "nextest-run"
