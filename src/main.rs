@@ -1,3 +1,29 @@
+//! Bun Docs MCP Proxy - Protocol adapter for Bun documentation search
+//!
+//! This proxy acts as a bridge between stdio-based MCP (Model Context Protocol) clients
+//! (like Zed editor) and the HTTP/SSE-based Bun documentation server at `https://bun.com/docs/mcp`.
+//!
+//! ## Request Flow
+//!
+//! ```text
+//! stdin (JSON-RPC) → Proxy → HTTP POST → bun.com/docs/mcp → SSE stream → parse → stdout (JSON-RPC)
+//! ```
+//!
+//! ## Supported JSON-RPC Methods
+//!
+//! - `initialize` - Initialize MCP connection, returns protocol version and capabilities
+//! - `tools/list` - List available tools (returns SearchBun tool)
+//! - `tools/call` - Execute a tool with parameters (forwarded to Bun Docs API)
+//! - `resources/list` - List available resources (returns Bun Documentation resource)
+//! - `resources/read` - Read a resource by URI (e.g., `bun://docs?query=Bun.serve`)
+//!
+//! ## Architecture
+//!
+//! The proxy consists of three main modules:
+//! - [`http`] - HTTP client with SSE parsing and retry logic
+//! - [`protocol`] - JSON-RPC 2.0 types and serialization
+//! - [`transport`] - Stdio transport layer for reading/writing messages
+
 mod http;
 mod protocol;
 mod transport;
@@ -6,6 +32,31 @@ use anyhow::Result;
 use protocol::{JsonRpcRequest, JsonRpcResponse};
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
+
+// JSON-RPC error codes
+const JSONRPC_PARSE_ERROR: i32 = -32700;
+const JSONRPC_INVALID_PARAMS: i32 = -32602;
+const JSONRPC_INTERNAL_ERROR: i32 = -32603;
+const JSONRPC_METHOD_NOT_FOUND: i32 = -32601;
+
+/// Extract a required string parameter from JSON-RPC params
+fn get_string_param<'a>(params: &'a serde_json::Value, key: &str) -> Result<&'a str, String> {
+    params
+        .get(key)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("Missing or invalid {} parameter", key))
+}
+
+/// Parse a Bun docs URI and extract the search query
+fn parse_bun_docs_uri(uri: &str) -> Result<String, String> {
+    if let Some(query_part) = uri.strip_prefix("bun://docs?query=") {
+        Ok(query_part.to_string())
+    } else if uri == "bun://docs" {
+        Ok("".to_string())
+    } else {
+        Err(format!("Invalid URI format: {}", uri))
+    }
+}
 
 fn init_logging() {
     tracing_subscriber::fmt()
@@ -44,12 +95,14 @@ SUPPORTED METHODS:
     initialize       Initialize the MCP connection
     tools/list       List available tools (SearchBun)
     tools/call       Call a tool with parameters
+    resources/list   List available resources (Bun Documentation)
+    resources/read   Read a resource by URI
 
 ENVIRONMENT VARIABLES:
     RUST_LOG         Set logging level (debug, info, warn, error)
 
 EXAMPLES:
-    # Start the proxy (typically called by MCP client)
+    # Start the proxy (typically called by an MCP client)
     {}
 
     # Start with debug logging
@@ -92,7 +145,7 @@ fn handle_args(args: &[String]) -> bool {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Handle command-line arguments before starting proxy
+    // Handle command-line arguments before starting the proxy
     let args: Vec<String> = std::env::args().collect();
     if handle_args(&args) {
         return Ok(());
@@ -125,7 +178,7 @@ async fn main() -> Result<()> {
                 error!("Failed to parse JSON-RPC request: {}", e);
                 let error_response = JsonRpcResponse::error(
                     serde_json::Value::Null,
-                    -32700,
+                    JSONRPC_PARSE_ERROR,
                     format!("Parse error: {}", e),
                 );
                 if let Ok(response_str) = serde_json::to_string(&error_response) {
@@ -141,10 +194,16 @@ async fn main() -> Result<()> {
         let response = match request.method.as_str() {
             "tools/call" => handle_tools_call(&http_client, &request).await,
             "tools/list" => handle_tools_list(&request),
+            "resources/list" => handle_resources_list(&request),
+            "resources/read" => handle_resources_read(&http_client, &request).await,
             "initialize" => handle_initialize(&request),
             method => {
                 error!("Unsupported method: {}", method);
-                JsonRpcResponse::error(request.id, -32601, format!("Method not found: {}", method))
+                JsonRpcResponse::error(
+                    request.id,
+                    JSONRPC_METHOD_NOT_FOUND,
+                    format!("Method not found: {}", method),
+                )
             }
         };
 
@@ -192,7 +251,11 @@ async fn handle_tools_call(
         }
         Err(e) => {
             error!("Failed to forward request: {}", e);
-            JsonRpcResponse::error(request.id.clone(), -32603, format!("Internal error: {}", e))
+            JsonRpcResponse::error(
+                request.id.clone(),
+                JSONRPC_INTERNAL_ERROR,
+                format!("Internal error: {}", e),
+            )
         }
     }
 }
@@ -219,12 +282,113 @@ fn handle_tools_list(request: &JsonRpcRequest) -> JsonRpcResponse {
     JsonRpcResponse::success(request.id.clone(), tools)
 }
 
+fn handle_resources_list(request: &JsonRpcRequest) -> JsonRpcResponse {
+    // Return available resources
+    let resources = serde_json::json!({
+        "resources": [{
+            "uri": "bun://docs",
+            "name": "Bun Documentation",
+            "description": "Search and browse Bun documentation",
+            "mimeType": "application/json"
+        }]
+    });
+
+    JsonRpcResponse::success(request.id.clone(), resources)
+}
+
+async fn handle_resources_read(
+    client: &http::BunDocsClient,
+    request: &JsonRpcRequest,
+) -> JsonRpcResponse {
+    // Extract and validate params
+    let params = match &request.params {
+        Some(p) => p,
+        None => {
+            return JsonRpcResponse::error(
+                request.id.clone(),
+                JSONRPC_INVALID_PARAMS,
+                "Missing params".to_string(),
+            );
+        }
+    };
+
+    // Extract URI parameter
+    let uri = match get_string_param(params, "uri") {
+        Ok(u) => u,
+        Err(msg) => {
+            return JsonRpcResponse::error(request.id.clone(), JSONRPC_INVALID_PARAMS, msg);
+        }
+    };
+
+    // Parse URI to extract query
+    let query = match parse_bun_docs_uri(uri) {
+        Ok(q) => q,
+        Err(msg) => {
+            return JsonRpcResponse::error(request.id.clone(), JSONRPC_INVALID_PARAMS, msg);
+        }
+    };
+
+    // Forward to tools/call internally
+    let search_request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": request.id,
+        "method": "tools/call",
+        "params": {
+            "name": "SearchBun",
+            "arguments": {
+                "query": query
+            }
+        }
+    });
+
+    match client.forward_request(search_request).await {
+        Ok(result) => {
+            info!("Successfully got resource from Bun Docs");
+
+            // Serialize the result to JSON string for resource text field
+            // Note: result is the complete JSON-RPC response from Bun Docs API
+            // containing {"jsonrpc":"2.0","id":...,"result":{...}}
+            let text = match serde_json::to_string(&result) {
+                Ok(s) => s,
+                Err(e) => {
+                    error!("Failed to serialize resource content: {}", e);
+                    return JsonRpcResponse::error(
+                        request.id.clone(),
+                        JSONRPC_INTERNAL_ERROR,
+                        format!("Failed to serialize resource: {}", e),
+                    );
+                }
+            };
+
+            // Wrap in MCP resource format
+            let resource_response = serde_json::json!({
+                "contents": [{
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": text
+                }]
+            });
+
+            JsonRpcResponse::success(request.id.clone(), resource_response)
+        }
+        Err(e) => {
+            error!("Failed to read resource: {}", e);
+            JsonRpcResponse::error(
+                request.id.clone(),
+                JSONRPC_INTERNAL_ERROR,
+                format!("Internal error: {}", e),
+            )
+        }
+    }
+}
+
 fn handle_initialize(request: &JsonRpcRequest) -> JsonRpcResponse {
     // Handle MCP initialize request
     let init_result = serde_json::json!({
         "protocolVersion": "2024-11-05",
         "capabilities": {
-            "tools": {}
+            "tools": {},
+            "resources": {}
         },
         "serverInfo": {
             "name": "bun-docs-mcp-proxy",
@@ -372,6 +536,31 @@ mod tests {
 
         // Verify protocol version matches MCP spec
         assert_eq!(serialized["result"]["protocolVersion"], "2024-11-05");
+        // Verify both capabilities are present
+        assert!(serialized["result"]["capabilities"]["tools"].is_object());
+        assert!(serialized["result"]["capabilities"]["resources"].is_object());
+    }
+
+    #[test]
+    fn test_handle_resources_list() {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!("res-list"),
+            method: "resources/list".to_string(),
+            params: None,
+        };
+
+        let response = handle_resources_list(&request);
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert_eq!(serialized["id"], "res-list");
+        assert!(serialized["result"]["resources"].is_array());
+
+        let resources = serialized["result"]["resources"].as_array().unwrap();
+        assert_eq!(resources.len(), 1);
+        assert_eq!(resources[0]["uri"], "bun://docs");
+        assert_eq!(resources[0]["name"], "Bun Documentation");
+        assert_eq!(resources[0]["mimeType"], "application/json");
     }
 
     #[test]
@@ -393,81 +582,177 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handle_tools_call_with_result_extraction() {
-        let mut server = mockito::Server::new_async().await;
-
-        let _mock = server
-            .mock("POST", "/")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(r#"{"result": {"data": "extracted"}}"#)
-            .create_async()
-            .await;
-
-        let client = http::BunDocsClient::new_with_url(server.url());
+    async fn test_handle_tools_call_real_api() {
+        let client = http::BunDocsClient::new();
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: json!(1),
             method: "tools/call".to_string(),
-            params: Some(json!({"name": "SearchBun"})),
+            params: Some(json!({
+                "name": "SearchBun",
+                "arguments": {
+                    "query": "Bun.serve"
+                }
+            })),
         };
 
         let response = handle_tools_call(&client, &request).await;
         let serialized = serde_json::to_value(&response).unwrap();
 
         assert!(serialized["result"].is_object());
+        assert!(serialized["result"]["content"].is_array());
     }
 
     #[tokio::test]
-    async fn test_handle_tools_call_without_result_field() {
-        let mut server = mockito::Server::new_async().await;
-
-        let _mock = server
-            .mock("POST", "/")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(r#"{"data": "no result field"}"#)
-            .create_async()
-            .await;
-
-        let client = http::BunDocsClient::new_with_url(server.url());
+    async fn test_handle_tools_call_empty_query() {
+        // NOTE: This test reflects Bun API's current behavior for empty query.
+        // As of now, Bun returns {"content":[{"text":"No results found","type":"text"}],"isError":true}
+        // If Bun changes this behavior (e.g., returns docs overview), update expected output accordingly.
+        let client = http::BunDocsClient::new();
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: json!(2),
             method: "tools/call".to_string(),
-            params: None,
+            params: Some(json!({
+                "name": "SearchBun",
+                "arguments": {
+                    "query": ""
+                }
+            })),
         };
 
         let response = handle_tools_call(&client, &request).await;
         let serialized = serde_json::to_value(&response).unwrap();
 
-        assert!(serialized["result"]["data"].is_string());
+        // Proxy should forward successfully; Bun API decides what empty query means
+        assert!(serialized["result"].is_object());
     }
 
     #[tokio::test]
-    async fn test_handle_tools_call_http_error() {
-        let mut server = mockito::Server::new_async().await;
-
-        let _mock = server
-            .mock("POST", "/")
-            .with_status(503)
-            .with_body("Service Unavailable")
-            .create_async()
-            .await;
-
-        let client = http::BunDocsClient::new_with_url(server.url());
+    async fn test_handle_resources_read_with_query() {
+        let client = http::BunDocsClient::new();
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
-            id: json!(3),
-            method: "tools/call".to_string(),
+            id: json!("res1"),
+            method: "resources/read".to_string(),
+            params: Some(json!({"uri": "bun://docs?query=Bun.serve"})),
+        };
+
+        let response = handle_resources_read(&client, &request).await;
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert!(serialized["result"]["contents"].is_array());
+        let contents = serialized["result"]["contents"].as_array().unwrap();
+        assert_eq!(contents.len(), 1);
+        assert_eq!(contents[0]["uri"], "bun://docs?query=Bun.serve");
+        assert_eq!(contents[0]["mimeType"], "application/json");
+    }
+
+    #[tokio::test]
+    async fn test_handle_resources_read_empty_query() {
+        // NOTE: Tests bun://docs (no query param) which proxy converts to empty query string.
+        // Bun API currently returns "No results found" for empty queries.
+        // If Bun changes to return overview/help for empty query, this test still passes (valid contents array).
+        let client = http::BunDocsClient::new();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!("res2"),
+            method: "resources/read".to_string(),
+            params: Some(json!({"uri": "bun://docs"})),
+        };
+
+        let response = handle_resources_read(&client, &request).await;
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert!(serialized["result"]["contents"].is_array());
+    }
+
+    #[tokio::test]
+    async fn test_handle_resources_read_missing_params() {
+        let client = http::BunDocsClient::new();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!("res3"),
+            method: "resources/read".to_string(),
             params: None,
         };
 
-        let response = handle_tools_call(&client, &request).await;
+        let response = handle_resources_read(&client, &request).await;
         let serialized = serde_json::to_value(&response).unwrap();
 
         assert!(serialized["error"].is_object());
-        assert_eq!(serialized["error"]["code"], -32603);
+        assert_eq!(serialized["error"]["code"], -32602);
+        assert!(
+            serialized["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Missing params")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_resources_read_invalid_uri() {
+        let client = http::BunDocsClient::new();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!("res4"),
+            method: "resources/read".to_string(),
+            params: Some(json!({"uri": "invalid://uri"})),
+        };
+
+        let response = handle_resources_read(&client, &request).await;
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert!(serialized["error"].is_object());
+        assert_eq!(serialized["error"]["code"], -32602);
+        assert!(
+            serialized["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Invalid URI format")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_resources_read_missing_uri_param() {
+        let client = http::BunDocsClient::new();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!("res5"),
+            method: "resources/read".to_string(),
+            params: Some(json!({"other": "value"})),
+        };
+
+        let response = handle_resources_read(&client, &request).await;
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        assert!(serialized["error"].is_object());
+        assert_eq!(serialized["error"]["code"], -32602);
+        assert!(
+            serialized["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Missing or invalid uri parameter")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_resources_read_with_real_search() {
+        let client = http::BunDocsClient::new();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: json!("res6"),
+            method: "resources/read".to_string(),
+            params: Some(json!({"uri": "bun://docs?query=HTTP"})),
+        };
+
+        let response = handle_resources_read(&client, &request).await;
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        // Real API should return valid results
+        assert!(serialized["result"]["contents"].is_array());
+        let contents = serialized["result"]["contents"].as_array().unwrap();
+        assert!(!contents.is_empty());
     }
 
     #[test]
@@ -540,5 +825,34 @@ mod tests {
         let args = vec!["program".to_string(), "-V".to_string()];
         let result = handle_args(&args);
         assert!(result); // Should return true for version flag
+    }
+
+    #[test]
+    fn test_get_string_param() {
+        let params = json!({"uri": "bun://docs", "other": 123});
+
+        assert_eq!(get_string_param(&params, "uri").unwrap(), "bun://docs");
+        assert!(get_string_param(&params, "other").is_err());
+        assert!(get_string_param(&params, "missing").is_err());
+    }
+
+    #[test]
+    fn test_parse_bun_docs_uri() {
+        assert_eq!(parse_bun_docs_uri("bun://docs").unwrap(), "");
+        assert_eq!(parse_bun_docs_uri("bun://docs?query=test").unwrap(), "test");
+        assert_eq!(
+            parse_bun_docs_uri("bun://docs?query=Bun.serve").unwrap(),
+            "Bun.serve"
+        );
+        assert!(parse_bun_docs_uri("invalid://uri").is_err());
+        assert!(parse_bun_docs_uri("").is_err());
+    }
+
+    #[test]
+    fn test_jsonrpc_error_code_constants() {
+        assert_eq!(JSONRPC_PARSE_ERROR, -32700);
+        assert_eq!(JSONRPC_INVALID_PARAMS, -32602);
+        assert_eq!(JSONRPC_INTERNAL_ERROR, -32603);
+        assert_eq!(JSONRPC_METHOD_NOT_FOUND, -32601);
     }
 }

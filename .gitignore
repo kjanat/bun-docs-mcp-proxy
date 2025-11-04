@@ -285,5 +285,8 @@ bin/
 tarpaulin-report.html
 
 cobertura.xml
-
+codecov.json
 lcov.info
+junit.xml
+
+.playwright-mcp/

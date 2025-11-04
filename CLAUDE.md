@@ -31,6 +31,14 @@ RUST_LOG=debug ./target/release/bun-docs-mcp-proxy
 # Manual test of tools/call
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"SearchBun","arguments":{"query":"Bun.serve"}}}' | \
 ./target/release/bun-docs-mcp-proxy
+
+# Manual test of resources/read
+echo '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"bun://docs?query=Bun.serve"}}' | \
+./target/release/bun-docs-mcp-proxy
+
+# Manual test of resources/list
+echo '{"jsonrpc":"2.0","id":1,"method":"resources/list"}' | \
+./target/release/bun-docs-mcp-proxy
 ```
 
 ### Cross-Platform Builds
@@ -84,16 +92,16 @@ cargo build --release --target x86_64-pc-windows-msvc
 
 ## Testing
 
-**Test Coverage: 85.98%** (552/642 lines)
+**Test Coverage: X%** (X/X lines)
 
 ### Test Suite (46 tests)
 
 **Unit Tests** (41 tests):
 
-- `src/protocol/mod.rs` - JSON-RPC serialization/deserialization (100% coverage)
-- `src/http/mod.rs` - HTTP client, SSE parsing, mocked API tests (95.45% coverage)
-- `src/transport/mod.rs` - Stdio transport logic (56.10% coverage)
-- `src/main.rs` - Handler functions, error paths (84.00% coverage)
+- `src/protocol/mod.rs` - JSON-RPC serialization/deserialization
+- `src/http/mod.rs` - HTTP client, SSE parsing, mocked API tests
+- `src/transport/mod.rs` - Stdio transport logic
+- `src/main.rs` - Handler functions, error paths
 
 **Integration Tests** (5 tests):
 
@@ -117,18 +125,25 @@ make coverage
 
 # Coverage summary
 make coverage-text
+
+# Run with cargo-nextest (faster test runner with JUnit output)
+cargo nextest run --all-features --workspace --profile ci
+# JUnit report saved to target/nextest/ci/junit.xml
 ```
 
 Tests use `cargo-llvm-cov` (not tarpaulin) for accurate async coverage.
 Mock HTTP server tests use `mockito` for reliable async test execution.
+CI uses `cargo-nextest` for faster test execution and JUnit XML reporting.
 
 ## Protocol Implementation
 
 **Supported Methods**:
 
-- `initialize` - Returns protocol version `2024-11-05`, capabilities, server info
+- `initialize` - Returns protocol version `2024-11-05`, capabilities (tools + resources), server info
 - `tools/list` - Returns single tool: `SearchBun` with `query` string parameter
 - `tools/call` - Forwards to Bun Docs API, extracts `result` from SSE response
+- `resources/list` - Returns single resource: `bun://docs` with Bun Documentation
+- `resources/read` - Reads resource by URI (e.g., `bun://docs?query=Bun.serve`)
 
 **SSE Parsing Logic** (`src/http/mod.rs:68-106`):
 

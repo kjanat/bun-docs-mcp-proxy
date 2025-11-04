@@ -16,15 +16,13 @@ repos:
     hooks:
       - id: tombi-format
       - id: tombi-lint
-  - repo: https://github.com/doublify/pre-commit-rust
-    rev: v1.0
+  - repo: https://github.com/FeryET/pre-commit-rust
+    rev: v1.2.1
     hooks:
       - id: fmt
       - id: cargo-check
-  - repo: https://github.com/biomejs/pre-commit
-    rev: v2.3.2
-    hooks:
-      - id: biome-check
+      - id: build
+      - id: test
   - repo: local
     hooks:
       - id: actionlint
