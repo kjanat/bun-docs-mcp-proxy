@@ -40,13 +40,13 @@
 //! Transient failures (network errors, 429, 5xx status codes) are retried up to
 //! [`MAX_RETRIES`] times with exponential backoff (200 ms → 400 ms → 800 ms, capped at 1 s).
 
-use anyhow::{Context, Result};
+use anyhow::{Context as _, Result};
 use bytes::Bytes;
-use eventsource_stream::Eventsource;
-use futures::StreamExt;
+use core::time::Duration;
+use eventsource_stream::Eventsource as _;
+use futures::StreamExt as _;
 use reqwest::{Client, StatusCode, Url, header::HeaderMap};
 use serde_json::Value;
-use std::time::Duration;
 use tracing::{debug, info, warn};
 
 const BUN_DOCS_API: &str = "https://bun.com/docs/mcp";
@@ -93,13 +93,13 @@ impl BunDocsClient {
         debug_assert!(attempt > 0, "attempt must be >= 1");
         // 200ms, 400ms, 800ms (cap at 1000ms)
         // Safe: attempt.saturating_sub(1) will be small in practice (<= MAX_RETRIES=3)
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(clippy::cast_possible_truncation)]
         let base = BACKOFF_BASE_MS.saturating_mul(1u64 << (attempt.saturating_sub(1) as u32));
         base.min(BACKOFF_MAX_MS)
     }
 
     /// Check if HTTP status code indicates a transient error worth retrying
-    fn is_transient_status(status: StatusCode) -> bool {
+    const fn is_transient_status(status: StatusCode) -> bool {
         matches!(
             status,
             StatusCode::TOO_MANY_REQUESTS
@@ -202,7 +202,7 @@ impl BunDocsClient {
                         let limited_bytes = if bytes.len() > MAX_ERROR_BODY_SIZE {
                             &bytes[..MAX_ERROR_BODY_SIZE]
                         } else {
-                            &bytes[..]
+                            &*bytes
                         };
                         let body = String::from_utf8_lossy(limited_bytes);
                         let body_snippet = Self::truncate_utf8(&body, 2048);

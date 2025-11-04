@@ -38,7 +38,7 @@ const JSONRPC_VERSION: &str = "2.0";
 
 #[derive(Debug, Deserialize)]
 pub struct JsonRpcRequest {
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub jsonrpc: String,
     pub id: serde_json::Value,
     pub method: String,
@@ -66,7 +66,7 @@ pub struct JsonRpcError {
 
 impl JsonRpcError {
     /// Create a new JSON-RPC error without additional data
-    pub fn new(code: i32, message: String) -> Self {
+    pub const fn new(code: i32, message: String) -> Self {
         Self {
             code,
             message,
@@ -75,8 +75,7 @@ impl JsonRpcError {
     }
 
     /// Create a new JSON-RPC error with additional data
-    #[allow(dead_code)]
-    pub fn with_data(code: i32, message: String, data: serde_json::Value) -> Self {
+    pub const fn with_data(code: i32, message: String, data: serde_json::Value) -> Self {
         Self {
             code,
             message,
@@ -87,37 +86,37 @@ impl JsonRpcError {
 
 impl JsonRpcResponse {
     pub fn success(id: serde_json::Value, result: serde_json::Value) -> Self {
-        Self {
-            jsonrpc: JSONRPC_VERSION.to_string(),
+        return Self {
+            jsonrpc: JSONRPC_VERSION.to_owned(),
             id,
             result: Some(result),
             error: None,
-        }
+        };
     }
 
     pub fn error(id: serde_json::Value, code: i32, message: String) -> Self {
-        Self {
-            jsonrpc: JSONRPC_VERSION.to_string(),
+        return Self {
+            jsonrpc: JSONRPC_VERSION.to_owned(),
             id,
             result: None,
             error: Some(JsonRpcError::new(code, message)),
-        }
+        };
     }
 
     /// Create an error response with additional data
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn error_with_data(
         id: serde_json::Value,
         code: i32,
         message: String,
         data: serde_json::Value,
     ) -> Self {
-        Self {
-            jsonrpc: JSONRPC_VERSION.to_string(),
+        return Self {
+            jsonrpc: JSONRPC_VERSION.to_owned(),
             id,
             result: None,
             error: Some(JsonRpcError::with_data(code, message, data)),
-        }
+        };
     }
 }
 

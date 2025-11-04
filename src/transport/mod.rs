@@ -21,8 +21,8 @@
 //! are tightly coupled to real stdin/stdout types, making them difficult to unit test.
 //! They are tested through integration tests and manual testing with the actual binary.
 
-use anyhow::{Context, Result};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use anyhow::{Context as _, Result};
+use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tracing::debug;
 
 // Maximum length of messages to show in debug logs
@@ -82,7 +82,7 @@ impl StdioTransport {
         }
 
         debug!("Read message: {}...", Self::truncate_for_debug(line));
-        Ok(Some(line.to_string()))
+        return Ok(Some(line.to_owned()));
     }
 
     pub async fn write_message(&mut self, message: &str) -> Result<()> {

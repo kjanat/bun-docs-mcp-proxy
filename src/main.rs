@@ -30,8 +30,8 @@ mod transport;
 
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
+use core::fmt::Write as _;
 use protocol::{JsonRpcRequest, JsonRpcResponse};
-use std::fmt::Write as FmtWrite;
 use std::fs;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
@@ -106,7 +106,7 @@ fn get_string_param<'a>(params: &'a serde_json::Value, key: &str) -> Result<&'a 
 /// Parse a Bun docs URI and extract the search query
 fn parse_bun_docs_uri(uri: &str) -> Result<String, String> {
     if let Some(query_part) = uri.strip_prefix("bun://docs?query=") {
-        Ok(query_part.to_string())
+        return Ok(query_part.to_owned());
     } else if uri == "bun://docs" {
         Ok(String::new())
     } else {
@@ -158,7 +158,7 @@ fn extract_doc_entries(result: &serde_json::Value) -> Vec<DocEntry<'_>> {
             let url = text.lines().find_map(|line| {
                 let trimmed = line.trim();
                 if trimmed.starts_with("Link: ") {
-                    Some(trimmed.strip_prefix("Link: ").unwrap().trim().to_string())
+                    return Some(trimmed.strip_prefix("Link: ").unwrap().trim().to_owned());
                 } else {
                     None
                 }
@@ -230,7 +230,7 @@ async fn format_markdown(
             }
         } else {
             // No URL found, use original text content
-            mdx_parts.push(entry.text.to_string());
+            mdx_parts.push(entry.text.to_owned());
         }
     }
 
@@ -245,7 +245,7 @@ fn validate_output_path(path: &str) -> Result<(), String> {
     // Check for directory traversal attempts
     for component in path_obj.components() {
         if matches!(component, std::path::Component::ParentDir) {
-            return Err("Output path cannot contain '..' (directory traversal)".to_string());
+            return Err("Output path cannot contain '..' (directory traversal)".to_owned());
         }
     }
 
@@ -483,7 +483,7 @@ async fn handle_resources_read(
         return JsonRpcResponse::error(
             request.id.clone(),
             JSONRPC_INVALID_PARAMS,
-            "Missing params".to_string(),
+            "Missing params".to_owned(),
         );
     };
 
