@@ -165,7 +165,7 @@ impl BunDocsClient {
                 .json(&request)
                 .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS));
 
-            return match rb.send().await {
+            let outcome: Result<Value> = match rb.send().await {
                 Ok(response) => {
                     let status = response.status();
                     info!(
@@ -218,20 +218,20 @@ impl BunDocsClient {
                             continue;
                         }
 
-                        return Err(err);
+                        Err(err)
+                    } else {
+                        // Success: decide how to parse based on content type
+                        if content_type.starts_with("text/event-stream") {
+                            debug!("Parsing SSE stream");
+                            self.parse_sse_response(response).await
+                        } else {
+                            debug!("Parsing regular JSON response");
+                            response
+                                .json()
+                                .await
+                                .context("Failed to parse JSON response")
+                        }
                     }
-
-                    // Success: decide how to parse based on content type
-                    if content_type.starts_with("text/event-stream") {
-                        debug!("Parsing SSE stream");
-                        return self.parse_sse_response(response).await;
-                    }
-
-                    debug!("Parsing regular JSON response");
-                    response
-                        .json()
-                        .await
-                        .context("Failed to parse JSON response")
                 }
                 Err(e) => {
                     // Connection/timeout/etc. Retry if transient
@@ -254,6 +254,9 @@ impl BunDocsClient {
                     Err(err)
                 }
             };
+
+            // For any non-retry path, return the outcome (success or error)
+            return outcome;
         }
 
         Err(last_err.unwrap_or_else(|| anyhow::anyhow!("Unknown error sending request")))
