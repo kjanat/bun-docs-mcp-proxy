@@ -307,6 +307,22 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Verify release artifacts are available
+        run: |
+          # Extract version from tag
+          VERSION=${GITHUB_REF#refs/tags/v}
+
+          # Wait a bit for GitHub to make release assets fully available
+          echo "Waiting 30 seconds for release assets to propagate..."
+          sleep 30
+
+          # Verify key artifacts are accessible
+          echo "Verifying release artifacts..."
+          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/SHA256SUMS" -o /tmp/checksums
+          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/bun-docs-mcp-proxy-linux-x86_64.tar.gz" --head
+
+          echo "✓ Release artifacts verified and accessible"
+
       - name: Publish to npm
         working-directory: npm
         env:
