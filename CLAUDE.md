@@ -4,13 +4,50 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Rust-based tool with dual modes:
-1. **MCP Server**: Protocol adapter bridging stdio-based MCP clients (like Zed) with HTTP/SSE-based Bun docs API
-2. **CLI Tool**: Direct documentation search with formatted output (JSON/text/markdown) to terminal or file
+Rust-based MCP (Model Context Protocol) proxy that bridges stdio-based MCP clients (like Zed) with the HTTP/SSE-based
+Bun documentation server at `https://bun.com/docs/mcp`. Acts as a protocol adapter: receives JSON-RPC 2.0 over stdin,
+forwards to Bun Docs HTTP API, parses SSE responses, and returns JSON-RPC over stdout.
 
 ## Essential Commands
 
-### Build & Test
+### Task-based Workflow (Recommended)
+
+This project uses [Task](https://taskfile.dev) for build automation with GitHub Actions integration.
+
+```bash
+# Quick start - Common tasks
+task br          # Build release binary
+task t           # Run all tests
+task c           # Run all checks (fmt + clippy + tests)
+task cov         # Generate HTML coverage report
+
+# CI simulation (matches GitHub Actions)
+task ci          # Run CI checks locally
+task ci-lint     # Run lint checks
+task ci-coverage # Run coverage workflow
+
+# Development
+task dev         # Watch mode (auto-rebuild on changes)
+task run         # Run proxy in debug mode
+
+# Version management (with safety prompts)
+task bump-patch  # Bump patch version (0.2.1 → 0.2.2)
+task bump-minor  # Bump minor version (0.2.1 → 0.3.0) [prompted]
+task bump-major  # Bump major version (0.2.1 → 1.0.0) [prompted]
+
+# List all available tasks
+task --list-all
+```
+
+**CI Environment**: In CI/CD pipelines, use `--yes` flag to skip prompts:
+```bash
+task --yes clean        # Auto-confirm in CI
+task --yes bump-major   # Skip breaking change prompt
+```
+
+**GitHub Actions Integration**: Tasks automatically use collapsible output groups (`::group::`) in GitHub Actions for cleaner CI logs.
+
+### Build & Test (Raw Commands)
 
 ```bash
 # Build optimized release binary
@@ -19,11 +56,11 @@ cargo build --release
 # Run all tests
 cargo test
 
-# Run tests with Makefile
-make test
+# Run tests with Task
+task t
 
 # Generate coverage report (uses cargo-llvm-cov)
-make coverage
+task cov
 
 # Run with debug logging
 RUST_LOG=debug ./target/release/bun-docs-mcp-proxy
@@ -39,25 +76,6 @@ echo '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"bun://d
 # Manual test of resources/list
 echo '{"jsonrpc":"2.0","id":1,"method":"resources/list"}' | \
 ./target/release/bun-docs-mcp-proxy
-```
-
-### CLI Mode
-
-```bash
-# Search and output to terminal (JSON format)
-./target/release/bun-docs-mcp-proxy --search "Bun.serve"
-
-# Plain text format
-./target/release/bun-docs-mcp-proxy -s "HTTP server" -f text
-
-# Markdown format
-./target/release/bun-docs-mcp-proxy -s "WebSocket" -f markdown
-
-# Save to file
-./target/release/bun-docs-mcp-proxy -s "Bun.serve" -o docs.json
-
-# Text format to file
-./target/release/bun-docs-mcp-proxy -s "testing" -f text -o output.txt
 ```
 
 ### Cross-Platform Builds
@@ -82,10 +100,8 @@ cargo build --release --target x86_64-pc-windows-msvc
 
 **Module Breakdown**:
 
-- `src/main.rs` - Dual-mode entrypoint:
-  - **CLI mode** (if `--search` flag): Direct search with formatted output
-  - **MCP mode** (default): Event loop reading stdin → dispatch → write stdout
-  - Handles `initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`
+- `src/main.rs` - Event loop: read stdin → dispatch by method → write stdout. Handles `initialize`, `tools/list`,
+  `tools/call`
 - `src/protocol/` - JSON-RPC 2.0 types (`JsonRpcRequest`, `JsonRpcResponse`, `JsonRpcError`) with success/error builders
 - `src/transport/` - `StdioTransport`: async line-based stdin reader + stdout writer with flush
 - `src/http/` - `BunDocsClient`: HTTP client with SSE parser. Extracts `result` field from SSE data events
@@ -135,19 +151,17 @@ cargo build --release --target x86_64-pc-windows-msvc
 ### Running Tests
 
 ```bash
-# All tests
+# With Task (Recommended)
+task t           # Run all tests
+task tu          # Run unit tests only
+task ti          # Run integration tests only
+task tn          # Run with nextest (faster, JUnit output)
+task cov         # Generate HTML coverage report
+task covt        # Show coverage summary in terminal
+
+# Raw commands
 cargo test
-
-# With Makefile
 make test
-
-# Coverage report (uses cargo-llvm-cov)
-make coverage
-
-# Coverage summary
-make coverage-text
-
-# Run with cargo-nextest (faster test runner with JUnit output)
 cargo nextest run --all-features --workspace --profile ci
 # JUnit report saved to target/nextest/ci/junit.xml
 ```
@@ -174,26 +188,6 @@ CI uses `cargo-nextest` for faster test execution and JUnit XML reporting.
 - Breaks on first valid response (ignores subsequent events)
 - Returns error if no valid response found in stream
 
-## CLI Usage
-
-The binary supports both MCP server mode (default) and CLI search mode:
-
-**CLI Flags**:
-- `-s, --search <QUERY>` - Enable CLI mode with search query
-- `-o, --output <FILE>` - Write output to file (default: stdout)
-- `-f, --format <FORMAT>` - Output format: `json` (default), `text`, `markdown`
-- `-h, --help` - Show help
-- `-V, --version` - Show version
-
-**Output Formats**:
-- `json` - Pretty-printed JSON with full API response
-- `text` - Plain text extraction of content (strips metadata)
-- `markdown` - Markdown-formatted with heading and content blocks
-
-**CLI vs MCP Mode**:
-- CLI mode: Activated by `--search` flag, outputs directly, exits after search
-- MCP mode: Default when no `--search` flag, runs event loop on stdin/stdout
-
 ## Common Issues
 
 **Binary size increased**: Check release profile settings in `Cargo.toml`. Verify `strip = true`, `opt-level = "z"`, and
@@ -208,3 +202,12 @@ require adjustment.
 **Cross-compilation fails**: Ensure target toolchain installed with `rustup target add <target-triple>`.
 
 **CLI search returns empty**: Verify network connectivity to `https://bun.com/docs/mcp`. Check RUST_LOG=debug output for errors.
+
+**Task prompts fail in CI**: Tasks with `prompt:` (clean, bump-major, bump-minor, build-all-*) require `--yes` flag in non-interactive environments:
+```bash
+# CI/CD usage
+task --yes clean
+task --yes bump-major
+```
+
+**GitHub Actions logs verbose**: Task automatically groups output using `::group::` syntax. Expand/collapse groups in Actions UI for cleaner logs.

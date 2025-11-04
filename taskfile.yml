@@ -1,0 +1,489 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+# https://taskfile.dev
+
+version: "3"
+
+# Global watch interval (default: 100ms)
+interval: 500ms
+
+output:
+  group:
+    begin: "::group::{{.TASK}}"
+    end: "::endgroup::"
+    # Show all output, not just errors
+    error_only: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+vars:
+  BINARY_NAME: bun-docs-mcp-proxy
+  BUILD_DIR: target/release
+  COVERAGE_DIR: target/llvm-cov/html
+  DOC_DIR: target/doc
+  # Dynamic variables
+  CURRENT_VERSION:
+    sh: cargo pkgid | cut -d# -f2
+  COMMIT_HASH:
+    sh: git rev-parse HEAD
+  BUILD_TIME:
+    sh: date -u +"%Y-%m-%dT%H:%M:%SZ"
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmd: task --list-all
+    silent: true
+
+  # ===== Build Tasks =====
+  build:
+    desc: Build debug binary with all features and targets
+    cmd: cargo build --all-features --all-targets {{.CLI_ARGS}}
+
+  build-release:
+    desc: Build optimized release binary
+    aliases: [br, release]
+    cmd: cargo build --release
+    sources:
+      - src/**/*.rs
+      - Cargo.toml
+      - Cargo.lock
+    generates:
+      - "{{.BUILD_DIR}}/{{.BINARY_NAME}}"
+
+  clean:
+    desc: Remove build artifacts
+    prompt: Delete all build artifacts?
+    cmd: cargo clean
+
+  update:
+    desc: Update dependencies in Cargo.lock
+    cmd: cargo update {{.CLI_ARGS}}
+
+  # ===== Test Tasks =====
+  test:
+    desc: Run all tests with all features
+    aliases: [t]
+    cmd: cargo test --all-features {{.CLI_ARGS}}
+
+  test-unit:
+    desc: Run unit tests only
+    aliases: [tu]
+    cmd: cargo test --bins {{.CLI_ARGS}}
+
+  test-doc:
+    desc: Run documentation tests (N/A for binary-only crates)
+    cmd: echo "No doc tests available for binary-only crate"
+    silent: true
+
+  test-integration:
+    desc: Run integration tests only
+    aliases: [ti]
+    platforms: [linux, darwin]
+    deps: [build-release]
+    cmd: bash test-proxy.sh
+    preconditions:
+      - test -f test-proxy.sh
+      - sh: command -v jq
+        msg: "jq is required - install with 'sudo apt-get install -y jq'"
+
+  test-nextest:
+    desc: Run tests with nextest (faster, JUnit output)
+    aliases: [tn]
+    cmd: cargo nextest run --all-features --workspace --profile ci
+
+  test-all:
+    desc: Run all tests (unit + integration)
+    deps:
+      - test
+      - test-integration
+
+  # ===== Coverage Tasks =====
+  coverage:
+    desc: Generate HTML coverage report
+    aliases: [cov]
+    cmds:
+      - cargo llvm-cov --html
+      - defer: echo "Coverage report → {{.COVERAGE_DIR}}/index.html"
+
+  coverage-text:
+    desc: Show coverage summary in terminal
+    aliases: [covt]
+    cmd: cargo llvm-cov
+
+  coverage-nextest:
+    desc: Generate coverage with nextest (for CI)
+    cmds:
+      - cargo llvm-cov nextest --all-features --workspace --codecov --output-path codecov.json
+      - defer: echo "Coverage report → codecov.json"
+    generates:
+      - codecov.json
+
+  # ===== Linting & Formatting =====
+  fmt:
+    desc: Format code
+    cmd: cargo fmt {{.CLI_ARGS}}
+
+  fmt-check:
+    desc: Check code formatting
+    aliases: [fc]
+    cmd: cargo fmt -- --check
+
+  clippy:
+    desc: Run clippy linter with all features
+    aliases: [lint]
+    env:
+      RUSTFLAGS: -D warnings
+    cmd: cargo clippy --all-features --all-targets {{.CLI_ARGS}}
+
+  check:
+    desc: Run all checks (fmt, clippy, tests)
+    aliases: [c]
+    deps:
+      - fmt-check
+      - clippy
+      - test
+
+  # ===== Run Tasks =====
+  run:
+    desc: Run proxy in debug mode (MCP server)
+    env:
+      RUST_LOG: debug
+    cmd: cargo run {{.CLI_ARGS}}
+
+  run-release:
+    desc: Run proxy in release mode
+    aliases: [rr]
+    deps: [build-release]
+    env:
+      RUST_LOG: info
+    cmd: "{{.BUILD_DIR}}/{{.BINARY_NAME}}"
+
+  # ===== CLI Search Tasks =====
+  search:
+    desc: Search Bun docs (usage → task search -- "Bun.serve")
+    aliases: [s]
+    cmd: cargo run -- --search "{{.CLI_ARGS}}" | jq -r '.[]?[1]?.text'
+
+  search-release:
+    desc: Search using release binary
+    aliases: [sr]
+    deps: [build-release]
+    cmd: "{{.BUILD_DIR}}/{{.BINARY_NAME}} --search {{.CLI_ARGS}} | jq -r '.[]?[1]?.text'"
+
+  # ===== Manual MCP Protocol Tests =====
+  test-mcp-init:
+    desc: Test MCP initialize method
+    deps: [build-release]
+    cmd: echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | {{.BUILD_DIR}}/{{.BINARY_NAME}}
+
+  test-mcp-tools-list:
+    desc: Test MCP tools/list method
+    deps: [build-release]
+    cmd: echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | {{.BUILD_DIR}}/{{.BINARY_NAME}}
+
+  test-mcp-tools-call:
+    desc: Test MCP tools/call method
+    deps: [build-release]
+    cmd: echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"SearchBun","arguments":{"query":"Bun.serve"}}}' | {{.BUILD_DIR}}/{{.BINARY_NAME}}
+
+  test-mcp-resources-list:
+    desc: Test MCP resources/list method
+    deps: [build-release]
+    cmd: echo '{"jsonrpc":"2.0","id":1,"method":"resources/list"}' | {{.BUILD_DIR}}/{{.BINARY_NAME}}
+
+  test-mcp-resources-read:
+    desc: Test MCP resources/read method
+    deps: [build-release]
+    cmd: echo '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"bun://docs?query=Bun.serve"}}' | {{.BUILD_DIR}}/{{.BINARY_NAME}}
+
+  test-mcp-all:
+    desc: Run all manual MCP protocol tests
+    deps: [build-release]
+    cmds:
+      - task: test-mcp-init
+      - task: test-mcp-tools-list
+      - task: test-mcp-tools-call
+      - task: test-mcp-resources-list
+      - task: test-mcp-resources-read
+
+  # ===== Cross-Platform Builds (Native) =====
+  build-linux-gnu:
+    desc: Build for Linux x86_64 (GNU)
+    platforms: [linux]
+    cmd: cargo build --release --target x86_64-unknown-linux-gnu
+
+  build-macos-intel:
+    desc: Build for macOS Intel
+    platforms: [darwin]
+    cmd: cargo build --release --target x86_64-apple-darwin
+
+  build-macos-arm:
+    desc: Build for macOS Apple Silicon
+    platforms: [darwin]
+    cmd: cargo build --release --target aarch64-apple-darwin
+
+  build-windows:
+    desc: Build for Windows x86_64
+    platforms: [windows]
+    cmd: cargo build --release --target x86_64-pc-windows-msvc
+
+  build-windows-arm:
+    desc: Build for Windows ARM64
+    platforms: [windows]
+    cmd: cargo build --release --target aarch64-pc-windows-msvc
+
+  # ===== Cross-Platform Builds (Cross-compilation with Zig) =====
+  build-linux-arm64:
+    desc: Build for Linux ARM64 (cross-compile with Zig)
+    cmd: cargo zigbuild --release --target aarch64-unknown-linux-gnu
+
+  build-linux-musl:
+    desc: Build for Linux x86_64 musl (static)
+    cmd: cargo zigbuild --release --target x86_64-unknown-linux-musl
+
+  build-linux-arm64-musl:
+    desc: Build for Linux ARM64 musl (static)
+    cmd: cargo zigbuild --release --target aarch64-unknown-linux-musl
+
+  build-all-native:
+    desc: Build for all native platforms (no cross-compilation)
+    prompt: Build for ALL platforms? This will take several minutes.
+    deps:
+      - build-linux-gnu
+      - build-macos-intel
+      - build-macos-arm
+      - build-windows
+      - build-windows-arm
+
+  build-all-cross:
+    desc: Build for all cross-compilation targets (requires Zig)
+    prompt: Build for ALL platforms? This will take several minutes.
+    deps:
+      - build-linux-arm64
+      - build-linux-musl
+      - build-linux-arm64-musl
+
+  # ===== Release Packaging =====
+  package-linux:
+    desc: Package Linux x86_64 binary as tar.gz
+    platforms: [linux]
+    vars:
+      TARGET: x86_64-unknown-linux-gnu
+      NAME: linux-x86_64
+    deps: [build-linux-gnu]
+    dir: target/{{.TARGET}}/release
+    cmd: tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
+
+  package-linux-arm64:
+    desc: Package Linux ARM64 binary as tar.gz
+    vars:
+      TARGET: aarch64-unknown-linux-gnu
+      NAME: linux-aarch64
+    deps: [build-linux-arm64]
+    dir: target/{{.TARGET}}/release
+    cmd: tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
+
+  package-linux-musl:
+    desc: Package Linux x86_64 musl binary as tar.gz
+    vars:
+      TARGET: x86_64-unknown-linux-musl
+      NAME: linux-x86_64-musl
+    deps: [build-linux-musl]
+    dir: target/{{.TARGET}}/release
+    cmd: tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
+
+  package-linux-arm64-musl:
+    desc: Package Linux ARM64 musl binary as tar.gz
+    vars:
+      TARGET: aarch64-unknown-linux-musl
+      NAME: linux-aarch64-musl
+    deps: [build-linux-arm64-musl]
+    dir: target/{{.TARGET}}/release
+    cmd: cd target/{{.TARGET}}/release && tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
+
+  package-macos-intel:
+    desc: Package macOS Intel binary as tar.gz
+    platforms: [darwin]
+    vars:
+      TARGET: x86_64-apple-darwin
+      NAME: macos-x86_64
+    deps: [build-macos-intel]
+    dir: target/{{.TARGET}}/release
+    cmd: tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
+
+  package-macos-arm:
+    desc: Package macOS Apple Silicon binary as tar.gz
+    platforms: [darwin]
+    vars:
+      TARGET: aarch64-apple-darwin
+      NAME: macos-aarch64
+    deps: [build-macos-arm]
+    dir: target/{{.TARGET}}/release
+    cmd: tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
+
+  package-windows:
+    desc: Package Windows x86_64 binary as zip
+    platforms: [windows]
+    vars:
+      TARGET: x86_64-pc-windows-msvc
+      NAME: windows-x86_64
+    deps: [build-windows]
+    dir: target/{{.TARGET}}/release
+    cmd: 7z a {{.BINARY_NAME}}-{{.NAME}}.zip {{.BINARY_NAME}}.exe
+
+  package-windows-arm:
+    desc: Package Windows ARM64 binary as zip
+    platforms: [windows]
+    vars:
+      TARGET: aarch64-pc-windows-msvc
+      NAME: windows-aarch64
+    deps: [build-windows-arm]
+    dir: target/{{.TARGET}}/release
+    cmd: 7z a {{.BINARY_NAME}}-{{.NAME}}.zip {{.BINARY_NAME}}.exe
+
+  # ===== Checksums =====
+  checksums:
+    desc: Generate SHA256SUMS for all packaged binaries
+    cmds:
+      - defer: rm -f SHA256SUMS.tmp
+      - find target -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec sha256sum {} \; | sed 's|target/[^/]*/release/||' > SHA256SUMS.tmp
+      - mv SHA256SUMS.tmp SHA256SUMS
+      - cat SHA256SUMS
+
+  # ===== Development Tools =====
+  install-tools:
+    desc: Install development tools (llvm-cov, nextest, watch, zigbuild)
+    cmds:
+      - rustup component add llvm-tools-preview
+      - cargo install cargo-llvm-cov cargo-nextest cargo-watch cargo-zigbuild
+
+  watch:
+    desc: Watch for changes and run tests
+    watch: true
+    cmd: cargo watch -x test
+
+  watch-check:
+    desc: Watch for changes and run clippy + tests
+    watch: true
+    cmd: cargo watch -x clippy -x test
+
+  dev:
+    desc: Development mode - auto-rebuild on changes
+    aliases: [d]
+    watch: true
+    sources:
+      - src/**/*.rs
+      - Cargo.toml
+      - Cargo.lock
+    cmds:
+      - echo "Rebuilding {{.CURRENT_VERSION}}..."
+      - cargo build
+
+  # ===== CI/CD Simulation =====
+  ci:
+    desc: Run CI checks locally (matches GitHub Actions)
+    env:
+      RUSTFLAGS: -D warnings
+    cmds:
+      - task: build
+      - task: test
+      - task: test-integration
+      - task: fmt-check
+      - task: clippy
+
+  ci-coverage:
+    desc: Run CI coverage workflow locally
+    env:
+      RUSTFLAGS: -D warnings
+    cmds:
+      - task: test-nextest
+      - task: coverage-nextest
+
+  ci-lint:
+    desc: Run CI lint workflow locally
+    env:
+      RUSTFLAGS: -D warnings
+    cmds:
+      - task: fmt-check
+      - task: clippy
+
+  ci-all:
+    desc: Run complete CI pipeline locally
+    cmds:
+      - task: ci
+      - task: ci-coverage
+      - task: ci-lint
+
+  # ===== Version Management =====
+  version:
+    desc: Show current version from Cargo.toml
+    silent: true
+    cmd: echo "Version {{.CURRENT_VERSION}}"
+
+  bump-patch:
+    desc: Bump patch version (0.2.1 → 0.2.2)
+    cmd: cargo set-version --bump patch
+
+  bump-minor:
+    desc: Bump minor version (0.2.1 → 0.3.0)
+    prompt: Bump minor version (new features)?
+    cmd: cargo set-version --bump minor
+
+  bump-major:
+    desc: Bump major version (0.2.1 → 1.0.0)
+    prompt: Bump major version? This is a BREAKING change!
+    cmd: cargo set-version --bump major
+
+  # ===== Benchmarking & Profiling =====
+  bench:
+    desc: Run benchmarks (if any exist)
+    cmd: cargo bench {{.CLI_ARGS}}
+
+  size:
+    desc: Show binary size
+    deps: [build-release]
+    cmds:
+      - ls -lh {{.BUILD_DIR}}/{{.BINARY_NAME}} | awk '{print "Binary size:", $5}'
+      - du -h {{.BUILD_DIR}}/{{.BINARY_NAME}}
+
+  # ===== Documentation =====
+  doc:
+    desc: Generate and open documentation
+    cmd: cargo doc --open --no-deps
+    generates:
+      - "{{.DOC_DIR}}/**"
+
+  doc-private:
+    internal: true
+    desc: Generate documentation including private items
+    cmd: cargo doc --no-deps --document-private-items
+    generates:
+      - "{{.DOC_DIR}}/bun_docs_mcp_proxy/**"
+
+  doc-pages:
+    desc: Build documentation for GitHub Pages (with redirect)
+    deps: [doc-private]
+    cmds:
+      - echo '<meta http-equiv="refresh" content="0; url=bun_docs_mcp_proxy/index.html">' > {{.DOC_DIR}}/index.html
+      - defer: echo "Documentation → {{.DOC_DIR}}/index.html"
+    silent: true
+    generates:
+      - "{{.DOC_DIR}}/index.html"
+
+  doc-pages-open:
+    desc: Build and open documentation for GitHub Pages
+    aliases: [dpo]
+    deps: [doc-pages]
+    dir: "{{.DOC_DIR}}"
+    silent: true
+    vars:
+      OPEN_CMD:
+        sh: |
+          case "{{OS}}" in
+            linux)   echo "xdg-open" ;;
+            darwin)  echo "open" ;;
+            windows) echo "start" ;;
+            *)       echo "xdg-open" ;;
+          esac
+    cmd: "{{.OPEN_CMD}} index.html"
