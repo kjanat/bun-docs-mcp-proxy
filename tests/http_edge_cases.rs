@@ -45,7 +45,7 @@ mod http_test_utils {
                     .text()
                     .await
                     .unwrap_or_else(|_| "unknown error".to_string());
-                anyhow::bail!("Bun Docs API error: {} - {}", status, error_text);
+                anyhow::bail!("Bun Docs API error: {status} - {error_text}");
             }
 
             let content_type = response
@@ -73,7 +73,7 @@ mod http_test_utils {
             while let Some(event_result) = event_stream.next().await {
                 match event_result {
                     Ok(event) => {
-                        if let Some(json_response) = self.parse_sse_event_data(&event.data)? {
+                        if let Some(json_response) = Self::parse_sse_event_data(&event.data)? {
                             return Ok(json_response);
                         }
                     }
@@ -87,13 +87,13 @@ mod http_test_utils {
             Err(anyhow::anyhow!("No valid JSON-RPC response in SSE stream"))
         }
 
-        fn parse_sse_event_data(&self, data: &str) -> Result<Option<Value>> {
+        fn parse_sse_event_data(data: &str) -> Result<Option<Value>> {
             if data.is_empty() {
                 return Ok(None);
             }
 
             let parsed = serde_json::from_str::<Value>(data)
-                .map_err(|e| anyhow::anyhow!("Failed to parse SSE event data as JSON: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to parse SSE event data as JSON: {e}"))?;
 
             if parsed.get("result").is_some() || parsed.get("error").is_some() {
                 Ok(Some(parsed))
@@ -165,7 +165,7 @@ async fn test_forward_request_timeout_with_real_slow_endpoint() {
     let result = client.forward_request(request).await;
     assert!(result.is_err());
     let error_msg = result.unwrap_err().to_string();
-    eprintln!("Timeout error: {}", error_msg);
+    eprintln!("Timeout error: {error_msg}");
     // Timeout manifests as "Failed to send request" error
     assert!(error_msg.contains("Failed to send") || error_msg.contains("Bun Docs API error"));
 }
@@ -219,7 +219,7 @@ async fn test_parse_invalid_json_response() {
     // httpbingo/html returns HTTP 405 for POST, which tests HTTP error handling
     assert!(result.is_err());
     let error_msg = result.unwrap_err().to_string();
-    eprintln!("HTML error: {}", error_msg);
+    eprintln!("HTML error: {error_msg}");
     assert!(
         error_msg.contains("405")
             || error_msg.contains("Method Not Allowed")

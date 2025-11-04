@@ -41,6 +41,7 @@
 //! [`MAX_RETRIES`] times with exponential backoff (200 ms → 400 ms → 800 ms, capped at 1 s).
 
 use anyhow::{Context, Result};
+use bytes::Bytes;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
 use reqwest::{Client, StatusCode, Url, header::HeaderMap};
@@ -91,6 +92,8 @@ impl BunDocsClient {
     fn backoff_delay_ms(attempt: usize) -> u64 {
         debug_assert!(attempt > 0, "attempt must be >= 1");
         // 200ms, 400ms, 800ms (cap at 1000ms)
+        // Safe: attempt.saturating_sub(1) will be small in practice (<= MAX_RETRIES=3)
+        #[allow(clippy::cast_possible_truncation)]
         let base = BACKOFF_BASE_MS.saturating_mul(1u64 << (attempt.saturating_sub(1) as u32));
         base.min(BACKOFF_MAX_MS)
     }
@@ -176,13 +179,25 @@ impl BunDocsClient {
                     let headers = response.headers().clone();
                     let content_type = Self::main_content_type(&headers);
 
-                    if !status.is_success() {
+                    if status.is_success() {
+                        // Success: decide how to parse based on content type
+                        if content_type.starts_with("text/event-stream") {
+                            debug!("Parsing SSE stream");
+                            self.parse_sse_response(response).await
+                        } else {
+                            debug!("Parsing regular JSON response");
+                            response
+                                .json()
+                                .await
+                                .context("Failed to parse JSON response")
+                        }
+                    } else {
                         // Read body (truncated) for context
                         // Limit to 100KB to prevent OOM from malicious/misconfigured servers
                         const MAX_ERROR_BODY_SIZE: usize = 100_000;
                         let bytes = response.bytes().await.unwrap_or_else(|e| {
                             warn!("Failed to read error response body: {}", e);
-                            Default::default()
+                            Bytes::default()
                         });
                         let limited_bytes = if bytes.len() > MAX_ERROR_BODY_SIZE {
                             &bytes[..MAX_ERROR_BODY_SIZE]
@@ -219,24 +234,12 @@ impl BunDocsClient {
                         }
 
                         Err(err)
-                    } else {
-                        // Success: decide how to parse based on content type
-                        if content_type.starts_with("text/event-stream") {
-                            debug!("Parsing SSE stream");
-                            self.parse_sse_response(response).await
-                        } else {
-                            debug!("Parsing regular JSON response");
-                            response
-                                .json()
-                                .await
-                                .context("Failed to parse JSON response")
-                        }
                     }
                 }
                 Err(e) => {
                     // Connection/timeout/etc. Retry if transient
                     let is_transient = e.is_connect() || e.is_timeout() || e.is_request();
-                    let err = anyhow::anyhow!("Failed to send request to Bun Docs API: {}", e);
+                    let err = anyhow::anyhow!("Failed to send request to Bun Docs API: {e}");
 
                     if is_transient && attempt < MAX_RETRIES {
                         warn!(
@@ -345,9 +348,7 @@ impl BunDocsClient {
         let status = response.status();
         if !status.is_success() {
             return Err(anyhow::anyhow!(
-                "Failed to fetch markdown: HTTP {} for URL: {}",
-                status,
-                url
+                "Failed to fetch markdown: HTTP {status} for URL: {url}"
             ));
         }
 
@@ -526,17 +527,14 @@ mod tests {
 
         let result = client.forward_request(request).await;
         // The API should either return a JSON-RPC error response or fail with an HTTP error
-        match result {
-            Ok(response) => {
-                // If successful, should have an error field in JSON-RPC response
-                assert!(
-                    response.get("error").is_some(),
-                    "Expected error field in response"
-                );
-            }
-            Err(_) => {
-                // HTTP-level error is also acceptable
-            }
+        if let Ok(response) = result {
+            // If successful, should have an error field in JSON-RPC response
+            assert!(
+                response.get("error").is_some(),
+                "Expected error field in response"
+            );
+        } else {
+            // HTTP-level error is also acceptable
         }
     }
 
@@ -880,5 +878,77 @@ mod tests {
             "Expected at least 600 ms for backoff, got {}ms",
             elapsed.as_millis()
         );
+    }
+
+    #[tokio::test]
+    async fn test_fetch_doc_markdown_success() {
+        let mut server = mockito::Server::new_async().await;
+
+        let mock = server
+            .mock("GET", "/docs/page")
+            .match_header("accept", "text/markdown")
+            .with_status(200)
+            .with_header("content-type", "text/markdown")
+            .with_body("# Test MDX\n\nSome content")
+            .expect(1)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::with_base_url(&server.url()).unwrap();
+        let url = format!("{}/docs/page", server.url());
+
+        let result = client.fetch_doc_markdown(&url).await;
+
+        mock.assert_async().await;
+        assert!(result.is_ok());
+        let mdx = result.unwrap();
+        assert!(mdx.contains("# Test MDX"));
+        assert!(mdx.contains("Some content"));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_doc_markdown_404_error() {
+        let mut server = mockito::Server::new_async().await;
+
+        let mock = server
+            .mock("GET", "/docs/missing")
+            .with_status(404)
+            .with_body("Not Found")
+            .expect(1)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::with_base_url(&server.url()).unwrap();
+        let url = format!("{}/docs/missing", server.url());
+
+        let result = client.fetch_doc_markdown(&url).await;
+
+        mock.assert_async().await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("404"));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_doc_markdown_500_error() {
+        let mut server = mockito::Server::new_async().await;
+
+        let mock = server
+            .mock("GET", "/docs/error")
+            .with_status(500)
+            .with_body("Internal Server Error")
+            .expect(1)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::with_base_url(&server.url()).unwrap();
+        let url = format!("{}/docs/error", server.url());
+
+        let result = client.fetch_doc_markdown(&url).await;
+
+        mock.assert_async().await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("500"));
     }
 }

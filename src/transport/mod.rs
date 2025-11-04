@@ -156,7 +156,7 @@ mod tests {
     fn test_write_message_format() {
         // Test message formatting logic
         let message = "test output";
-        let with_newline = format!("{}\n", message);
+        let with_newline = format!("{message}\n");
 
         assert_eq!(with_newline, "test output\n");
         assert!(with_newline.ends_with('\n'));
@@ -198,7 +198,7 @@ mod tests {
     #[test]
     fn test_message_format() {
         let message = "test message";
-        let with_newline = format!("{}\n", message);
+        let with_newline = format!("{message}\n");
         assert_eq!(with_newline, "test message\n");
         assert!(with_newline.ends_with('\n'));
     }

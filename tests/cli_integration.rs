@@ -8,7 +8,7 @@ use tempfile::tempdir;
 #[test]
 fn cli_search_basic() {
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
-    cmd.args(&["--search", "Bun.serve"])
+    cmd.args(["--search", "Bun.serve"])
         .assert()
         .success()
         .stdout(predicate::str::contains("content").or(predicate::str::contains("result")));
@@ -18,7 +18,7 @@ fn cli_search_basic() {
 #[test]
 fn cli_search_json_format() {
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
-    cmd.args(&["--search", "HTTP", "--format", "json"])
+    cmd.args(["--search", "HTTP", "--format", "json"])
         .assert()
         .success()
         .stdout(predicate::str::contains("{").and(predicate::str::contains("}")));
@@ -28,7 +28,7 @@ fn cli_search_json_format() {
 #[test]
 fn cli_search_text_format() {
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
-    cmd.args(&["--search", "server", "--format", "text"])
+    cmd.args(["--search", "server", "--format", "text"])
         .assert()
         .success();
     // Text format should not contain JSON brackets
@@ -41,7 +41,7 @@ fn cli_search_text_format() {
 #[test]
 fn cli_search_markdown_format() {
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
-    cmd.args(&["--search", "WebSocket", "--format", "markdown"])
+    cmd.args(["--search", "WebSocket", "--format", "markdown"])
         .assert()
         .success()
         .stdout(
@@ -60,7 +60,7 @@ fn cli_search_with_output_file() {
     let output_str = output_path.to_str().unwrap();
 
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
-    cmd.args(&["--search", "test", "--output", output_str])
+    cmd.args(["--search", "test", "--output", output_str])
         .assert()
         .success()
         .stderr(predicate::str::contains("Output written to:"));
@@ -79,7 +79,7 @@ fn cli_search_markdown_to_file() {
     let output_str = output_path.to_str().unwrap();
 
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
-    cmd.args(&[
+    cmd.args([
         "--search", "Bun", "--format", "markdown", "--output", output_str,
     ])
     .assert()
@@ -104,7 +104,7 @@ fn cli_search_file_overwrite_warning() {
     fs::write(&output_path, "existing content").unwrap();
 
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
-    cmd.args(&["--search", "test", "--output", output_str])
+    cmd.args(["--search", "test", "--output", output_str])
         .assert()
         .success()
         .stderr(predicate::str::contains("Warning").and(predicate::str::contains("overwritten")));
@@ -118,7 +118,7 @@ fn cli_search_file_overwrite_warning() {
 #[test]
 fn cli_search_invalid_output_path() {
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
-    cmd.args(&["--search", "test", "--output", "../../../etc/passwd"])
+    cmd.args(["--search", "test", "--output", "../../../etc/passwd"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("directory traversal"));
@@ -128,7 +128,7 @@ fn cli_search_invalid_output_path() {
 #[test]
 fn cli_search_empty_query() {
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
-    cmd.args(&["--search", ""]).assert().success(); // API handles empty queries
+    cmd.args(["--search", ""]).assert().success(); // API handles empty queries
 }
 
 /// Test short flags
@@ -139,7 +139,7 @@ fn cli_search_short_flags() {
     let output_str = output_path.to_str().unwrap();
 
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
-    cmd.args(&["-s", "test", "-f", "json", "-o", output_str])
+    cmd.args(["-s", "test", "-f", "json", "-o", output_str])
         .assert()
         .success();
 
@@ -155,7 +155,7 @@ fn cli_search_all_options() {
 
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
     cmd.env("RUST_LOG", "info")
-        .args(&[
+        .args([
             "--search",
             "Bun.serve",
             "--format",
@@ -181,7 +181,7 @@ fn cli_search_all_options() {
 fn cli_search_with_debug_logging() {
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
     cmd.env("RUST_LOG", "debug")
-        .args(&["--search", "test"])
+        .args(["--search", "test"])
         .assert()
         .success()
         .stderr(predicate::str::contains("bun_docs_mcp_proxy"));
@@ -191,7 +191,7 @@ fn cli_search_with_debug_logging() {
 #[test]
 fn cli_search_special_characters() {
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
-    cmd.args(&["--search", "Bun.serve()"]).assert().success();
+    cmd.args(["--search", "Bun.serve()"]).assert().success();
 }
 
 /// Test output to relative path
@@ -202,7 +202,7 @@ fn cli_search_relative_output_path() {
     std::env::set_current_dir(&temp_dir).unwrap();
 
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
-    cmd.args(&["--search", "test", "--output", "./output.json"])
+    cmd.args(["--search", "test", "--output", "./output.json"])
         .assert()
         .success();
 
@@ -216,7 +216,7 @@ fn cli_search_relative_output_path() {
 #[test]
 fn cli_search_not_mcp_mode() {
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
-    cmd.args(&["--search", "test"])
+    cmd.args(["--search", "test"])
         .write_stdin("invalid json input\n") // Should be ignored in CLI mode
         .assert()
         .success()

@@ -12,7 +12,7 @@
 //! ## Supported JSON-RPC Methods
 //!
 //! - `initialize` - Initialize MCP connection, returns protocol version and capabilities
-//! - `tools/list` - List available tools (returns SearchBun tool)
+//! - `tools/list` - List available tools (returns `SearchBun` tool)
 //! - `tools/call` - Execute a tool with parameters (forwarded to Bun Docs API)
 //! - `resources/list` - List available resources (returns Bun Documentation resource)
 //! - `resources/read` - Read a resource by URI (e.g., `bun://docs?query=Bun.serve`)
@@ -31,6 +31,7 @@ mod transport;
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use protocol::{JsonRpcRequest, JsonRpcResponse};
+use std::fmt::Write as FmtWrite;
 use std::fs;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
@@ -99,7 +100,7 @@ fn get_string_param<'a>(params: &'a serde_json::Value, key: &str) -> Result<&'a 
     params
         .get(key)
         .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("Missing or invalid {} parameter", key))
+        .ok_or_else(|| format!("Missing or invalid {key} parameter"))
 }
 
 /// Parse a Bun docs URI and extract the search query
@@ -107,9 +108,9 @@ fn parse_bun_docs_uri(uri: &str) -> Result<String, String> {
     if let Some(query_part) = uri.strip_prefix("bun://docs?query=") {
         Ok(query_part.to_string())
     } else if uri == "bun://docs" {
-        Ok("".to_string())
+        Ok(String::new())
     } else {
-        Err(format!("Invalid URI format: {}", uri))
+        Err(format!("Invalid URI format: {uri}"))
     }
 }
 
@@ -177,10 +178,10 @@ fn format_json(result: &serde_json::Value) -> Result<String> {
 fn format_text(result: &serde_json::Value) -> Result<String> {
     let texts = extract_content_texts(result);
 
-    if !texts.is_empty() {
-        Ok(texts.join("\n\n"))
-    } else {
+    if texts.is_empty() {
         Ok(serde_json::to_string_pretty(result)?)
+    } else {
+        Ok(texts.join("\n\n"))
     }
 }
 
@@ -214,17 +215,17 @@ async fn format_markdown(
                 Ok(mdx) => {
                     // Success: include URL comment and MDX content
                     let mut part = String::new();
-                    part.push_str(&format!("<!-- Source: {} -->\n\n", url));
+                    write!(part, "<!-- Source: {url} -->\n\n").unwrap();
                     part.push_str(&mdx);
                     mdx_parts.push(part);
                 }
                 Err(e) => {
                     // Error: include error comment and fallback to original text
                     let mut part = String::new();
-                    part.push_str(&format!("<!-- Error: {} -->\n\n", e));
+                    write!(part, "<!-- Error: {e} -->\n\n").unwrap();
                     part.push_str(entry.text);
                     mdx_parts.push(part);
-                    eprintln!("Failed to fetch MDX from {}: {}", url, e);
+                    eprintln!("Failed to fetch MDX from {url}: {e}");
                 }
             }
         } else {
@@ -261,14 +262,11 @@ async fn direct_search(
 
     // Validate output path if provided
     if let Some(path) = output_path {
-        validate_output_path(path).map_err(|e| anyhow::anyhow!("Invalid output path: {}", e))?;
+        validate_output_path(path).map_err(|e| anyhow::anyhow!("Invalid output path: {e}"))?;
 
         // Warn if file already exists
         if std::path::Path::new(path).exists() {
-            eprintln!(
-                "Warning: File '{}' already exists and will be overwritten",
-                path
-            );
+            eprintln!("Warning: File '{path}' already exists and will be overwritten");
         }
     }
 
@@ -294,7 +292,7 @@ async fn direct_search(
             .get("message")
             .and_then(|m| m.as_str())
             .unwrap_or("Unknown error");
-        return Err(anyhow::anyhow!("API error: {}", error_msg));
+        return Err(anyhow::anyhow!("API error: {error_msg}"));
     }
 
     // Extract result field if present
@@ -310,9 +308,9 @@ async fn direct_search(
     // Write output
     if let Some(path) = output_path {
         fs::write(path, formatted)?;
-        eprintln!("Output written to: {}", path);
+        eprintln!("Output written to: {path}");
     } else {
-        println!("{}", formatted);
+        println!("{formatted}");
     }
 
     Ok(())
@@ -359,7 +357,7 @@ async fn main() -> Result<()> {
                 let error_response = JsonRpcResponse::error(
                     serde_json::Value::Null,
                     JSONRPC_PARSE_ERROR,
-                    format!("Parse error: {}", e),
+                    format!("Parse error: {e}"),
                 );
                 if let Ok(response_str) = serde_json::to_string(&error_response) {
                     let _ = transport.write_message(&response_str).await;
@@ -382,7 +380,7 @@ async fn main() -> Result<()> {
                 JsonRpcResponse::error(
                     request.id,
                     JSONRPC_METHOD_NOT_FOUND,
-                    format!("Method not found: {}", method),
+                    format!("Method not found: {method}"),
                 )
             }
         };
@@ -434,7 +432,7 @@ async fn handle_tools_call(
             JsonRpcResponse::error(
                 request.id.clone(),
                 JSONRPC_INTERNAL_ERROR,
-                format!("Internal error: {}", e),
+                format!("Internal error: {e}"),
             )
         }
     }
@@ -481,15 +479,12 @@ async fn handle_resources_read(
     request: &JsonRpcRequest,
 ) -> JsonRpcResponse {
     // Extract and validate params
-    let params = match &request.params {
-        Some(p) => p,
-        None => {
-            return JsonRpcResponse::error(
-                request.id.clone(),
-                JSONRPC_INVALID_PARAMS,
-                "Missing params".to_string(),
-            );
-        }
+    let Some(params) = &request.params else {
+        return JsonRpcResponse::error(
+            request.id.clone(),
+            JSONRPC_INVALID_PARAMS,
+            "Missing params".to_string(),
+        );
     };
 
     // Extract URI parameter
@@ -535,7 +530,7 @@ async fn handle_resources_read(
                     return JsonRpcResponse::error(
                         request.id.clone(),
                         JSONRPC_INTERNAL_ERROR,
-                        format!("Failed to serialize resource: {}", e),
+                        format!("Failed to serialize resource: {e}"),
                     );
                 }
             };
@@ -556,7 +551,7 @@ async fn handle_resources_read(
             JsonRpcResponse::error(
                 request.id.clone(),
                 JSONRPC_INTERNAL_ERROR,
-                format!("Internal error: {}", e),
+                format!("Internal error: {e}"),
             )
         }
     }
@@ -1074,6 +1069,27 @@ mod tests {
         let result = serde_json::json!({"content": []});
         let entries = extract_doc_entries(&result);
         assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_doc_entries_multiple_with_mixed_urls() {
+        // Test multiple entries, some with URLs, some without
+        let result = serde_json::json!({"content": [
+            {"text": "Title: First\nLink: https://example.com/first\nContent: text", "type": "text"},
+            {"text": "No link here", "type": "text"},
+            {"text": "Title: Third\nLink: https://example.com/third", "type": "text"}
+        ]});
+        let entries = extract_doc_entries(&result);
+        assert_eq!(entries.len(), 3);
+        assert_eq!(
+            entries[0].url.as_ref().unwrap(),
+            "https://example.com/first"
+        );
+        assert!(entries[1].url.is_none());
+        assert_eq!(
+            entries[2].url.as_ref().unwrap(),
+            "https://example.com/third"
+        );
     }
 
     #[test]
