@@ -142,6 +142,20 @@ fn format_markdown(result: &serde_json::Value) -> Result<String> {
     Ok(output)
 }
 
+/// Validate output path to prevent directory traversal attacks
+fn validate_output_path(path: &str) -> Result<(), String> {
+    let path_obj = std::path::Path::new(path);
+
+    // Check for directory traversal attempts
+    for component in path_obj.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err("Output path cannot contain '..' (directory traversal)".to_string());
+        }
+    }
+
+    Ok(())
+}
+
 /// Execute a direct search query in CLI mode
 async fn direct_search(
     query: &str,
@@ -149,6 +163,19 @@ async fn direct_search(
     output_path: Option<&str>,
 ) -> Result<()> {
     let client = http::BunDocsClient::new();
+
+    // Validate output path if provided
+    if let Some(path) = output_path {
+        validate_output_path(path).map_err(|e| anyhow::anyhow!("Invalid output path: {}", e))?;
+
+        // Warn if file already exists
+        if std::path::Path::new(path).exists() {
+            eprintln!(
+                "Warning: File '{}' already exists and will be overwritten",
+                path
+            );
+        }
+    }
 
     // Build search request
     let request = serde_json::json!({
@@ -165,6 +192,15 @@ async fn direct_search(
 
     // Execute search
     let result = client.forward_request(request).await?;
+
+    // Check for API error response
+    if let Some(error) = result.get("error") {
+        let error_msg = error
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("Unknown error");
+        return Err(anyhow::anyhow!("API error: {}", error_msg));
+    }
 
     // Extract result field if present
     let search_result = result.get("result").unwrap_or(&result);
@@ -192,13 +228,15 @@ async fn main() -> Result<()> {
     // Parse CLI arguments
     let cli = Cli::parse();
 
+    // Initialize logging early for both CLI and server modes
+    init_logging();
+
     // CLI search mode
     if let Some(query) = &cli.search {
         return direct_search(query, &cli.format, cli.output.as_deref()).await;
     }
 
     // MCP server mode
-    init_logging();
     info!("Bun Docs MCP Proxy starting");
 
     let mut transport = transport::StdioTransport::new();
