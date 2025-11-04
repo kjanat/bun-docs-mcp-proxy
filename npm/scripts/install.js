@@ -15,14 +15,14 @@ function getPlatform() {
   const platform = process.platform;
   const arch = process.arch;
 
-  // Map Node.js platform/arch to Rust target triples
+  // Map Node.js platform/arch to release archive names
   const platformMap = {
-    'linux-x64': 'x86_64-unknown-linux-gnu',
-    'linux-arm64': 'aarch64-unknown-linux-gnu',
-    'darwin-x64': 'x86_64-apple-darwin',
-    'darwin-arm64': 'aarch64-apple-darwin',
-    'win32-x64': 'x86_64-pc-windows-msvc',
-    'win32-arm64': 'aarch64-pc-windows-msvc',
+    'linux-x64': 'linux-x86_64',
+    'linux-arm64': 'linux-aarch64',
+    'darwin-x64': 'macos-x86_64',
+    'darwin-arm64': 'macos-aarch64',
+    'win32-x64': 'windows-x86_64',
+    'win32-arm64': 'windows-aarch64',
   };
 
   const key = `${platform}-${arch}`;
@@ -89,7 +89,32 @@ function extractTarGz(archivePath, outputDir, binaryName) {
       }
     }
   } catch (error) {
-    throw new Error(`Failed to extract archive: ${error.message}`);
+    throw new Error(`Failed to extract tar.gz archive: ${error.message}`);
+  }
+}
+
+function extractZip(archivePath, outputDir, binaryName) {
+  // Use PowerShell on Windows (always available)
+  try {
+    execSync(`powershell -Command "Expand-Archive -Path '${archivePath}' -DestinationPath '${outputDir}' -Force"`, { stdio: 'pipe' });
+
+    // Move binary from extracted directory to bin directory if needed
+    const extractedBinary = path.join(outputDir, binaryName);
+    if (!fs.existsSync(extractedBinary)) {
+      // Binary might be in a subdirectory
+      const files = fs.readdirSync(outputDir);
+      for (const file of files) {
+        const fullPath = path.join(outputDir, file, binaryName);
+        if (fs.existsSync(fullPath)) {
+          fs.renameSync(fullPath, extractedBinary);
+          // Clean up directory
+          fs.rmSync(path.join(outputDir, file), { recursive: true, force: true });
+          break;
+        }
+      }
+    }
+  } catch (error) {
+    throw new Error(`Failed to extract zip archive: ${error.message}`);
   }
 }
 
@@ -117,7 +142,11 @@ async function install() {
     await download(downloadUrl, archivePath);
     console.log('Download complete, extracting...');
 
-    extractTarGz(archivePath, binDir, binaryName);
+    if (isWindows) {
+      extractZip(archivePath, binDir, binaryName);
+    } else {
+      extractTarGz(archivePath, binDir, binaryName);
+    }
 
     // Clean up archive
     fs.unlinkSync(archivePath);
