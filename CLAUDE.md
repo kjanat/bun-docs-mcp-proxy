@@ -31,6 +31,14 @@ RUST_LOG=debug ./target/release/bun-docs-mcp-proxy
 # Manual test of tools/call
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"SearchBun","arguments":{"query":"Bun.serve"}}}' | \
 ./target/release/bun-docs-mcp-proxy
+
+# Manual test of resources/read
+echo '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"bun://docs?query=Bun.serve"}}' | \
+./target/release/bun-docs-mcp-proxy
+
+# Manual test of resources/list
+echo '{"jsonrpc":"2.0","id":1,"method":"resources/list"}' | \
+./target/release/bun-docs-mcp-proxy
 ```
 
 ### Cross-Platform Builds

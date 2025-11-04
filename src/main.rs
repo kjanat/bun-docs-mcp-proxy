@@ -345,12 +345,27 @@ async fn handle_resources_read(
         Ok(result) => {
             info!("Successfully got resource from Bun Docs");
 
-            // Wrap in resource format
+            // Serialize the result to JSON string for resource text field
+            // Note: result is the complete JSON-RPC response from Bun Docs API
+            // containing {"jsonrpc":"2.0","id":...,"result":{...}}
+            let text = match serde_json::to_string(&result) {
+                Ok(s) => s,
+                Err(e) => {
+                    error!("Failed to serialize resource content: {}", e);
+                    return JsonRpcResponse::error(
+                        request.id.clone(),
+                        JSONRPC_INTERNAL_ERROR,
+                        format!("Failed to serialize resource: {}", e),
+                    );
+                }
+            };
+
+            // Wrap in MCP resource format
             let resource_response = serde_json::json!({
                 "contents": [{
                     "uri": uri,
                     "mimeType": "application/json",
-                    "text": serde_json::to_string(&result).unwrap_or_default()
+                    "text": text
                 }]
             });
 

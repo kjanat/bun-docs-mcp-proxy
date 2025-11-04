@@ -178,11 +178,18 @@ impl BunDocsClient {
 
                     if !status.is_success() {
                         // Read body (truncated) for context
+                        // Limit to 100KB to prevent OOM from malicious/misconfigured servers
+                        const MAX_ERROR_BODY_SIZE: usize = 100_000;
                         let bytes = response.bytes().await.unwrap_or_else(|e| {
                             warn!("Failed to read error response body: {}", e);
                             Default::default()
                         });
-                        let body = String::from_utf8_lossy(&bytes);
+                        let limited_bytes = if bytes.len() > MAX_ERROR_BODY_SIZE {
+                            &bytes[..MAX_ERROR_BODY_SIZE]
+                        } else {
+                            &bytes[..]
+                        };
+                        let body = String::from_utf8_lossy(limited_bytes);
                         let body_snippet = Self::truncate_utf8(&body, 2048);
                         let header_summary = Self::summarize_headers(&headers);
 
