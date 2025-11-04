@@ -824,6 +824,13 @@ mod tests {
     }
 
     #[test]
+    fn test_format_json_empty() {
+        let result = serde_json::json!({});
+        let formatted = format_json(&result).unwrap();
+        assert_eq!(formatted, "{}");
+    }
+
+    #[test]
     fn test_format_text() {
         let result = serde_json::json!({"content": [{"text": "test content", "type": "text"}]});
         let formatted = format_text(&result).unwrap();
@@ -832,11 +839,66 @@ mod tests {
     }
 
     #[test]
+    fn test_format_text_no_content() {
+        let result = serde_json::json!({"other": "data"});
+        let formatted = format_text(&result).unwrap();
+        assert!(formatted.contains("\"other\""));
+        assert!(formatted.contains("\"data\""));
+    }
+
+    #[test]
+    fn test_format_text_empty_content_array() {
+        let result = serde_json::json!({"content": []});
+        let formatted = format_text(&result).unwrap();
+        assert_eq!(formatted, "");
+    }
+
+    #[test]
+    fn test_format_text_multiple_items() {
+        let result = serde_json::json!({"content": [
+            {"text": "first item", "type": "text"},
+            {"text": "second item", "type": "text"}
+        ]});
+        let formatted = format_text(&result).unwrap();
+        assert!(formatted.contains("first item"));
+        assert!(formatted.contains("second item"));
+    }
+
+    #[test]
     fn test_format_markdown() {
         let result = serde_json::json!({"content": [{"text": "test content", "type": "text"}]});
         let formatted = format_markdown(&result).unwrap();
         assert!(formatted.contains("# Bun Documentation Search Results"));
         assert!(formatted.contains("test content"));
+    }
+
+    #[test]
+    fn test_format_markdown_no_content() {
+        let result = serde_json::json!({"other": "data"});
+        let formatted = format_markdown(&result).unwrap();
+        assert!(formatted.contains("# Bun Documentation Search Results"));
+        assert!(formatted.contains("```json"));
+        assert!(formatted.contains("\"other\""));
+    }
+
+    #[test]
+    fn test_format_markdown_multiple_items() {
+        let result = serde_json::json!({"content": [
+            {"text": "# First Section", "type": "text"},
+            {"text": "## Second Section", "type": "text"}
+        ]});
+        let formatted = format_markdown(&result).unwrap();
+        assert!(formatted.contains("# Bun Documentation Search Results"));
+        assert!(formatted.contains("# First Section"));
+        assert!(formatted.contains("## Second Section"));
+    }
+
+    #[test]
+    fn test_format_markdown_empty_content() {
+        let result = serde_json::json!({"content": []});
+        let formatted = format_markdown(&result).unwrap();
+        assert!(formatted.contains("# Bun Documentation Search Results"));
+        assert_eq!(formatted.trim(), "# Bun Documentation Search Results");
     }
 
     #[test]
@@ -866,5 +928,70 @@ mod tests {
         assert_eq!(JSONRPC_INVALID_PARAMS, -32602);
         assert_eq!(JSONRPC_INTERNAL_ERROR, -32603);
         assert_eq!(JSONRPC_METHOD_NOT_FOUND, -32601);
+    }
+
+    #[tokio::test]
+    async fn test_direct_search_json_format() {
+        let result = direct_search("Bun.serve", &OutputFormat::Json, None).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_direct_search_text_format() {
+        let result = direct_search("HTTP", &OutputFormat::Text, None).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_direct_search_markdown_format() {
+        let result = direct_search("server", &OutputFormat::Markdown, None).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_direct_search_with_output_file() {
+        let temp_dir = std::env::temp_dir();
+        let output_path = temp_dir.join("test_search_output.json");
+        let output_str = output_path.to_str().unwrap();
+
+        let result = direct_search("test", &OutputFormat::Json, Some(output_str)).await;
+        assert!(result.is_ok());
+
+        // Verify file was created
+        assert!(output_path.exists());
+
+        // Read and verify content
+        let content = std::fs::read_to_string(&output_path).unwrap();
+        assert!(!content.is_empty());
+
+        // Cleanup
+        let _ = std::fs::remove_file(&output_path);
+    }
+
+    #[tokio::test]
+    async fn test_direct_search_empty_query() {
+        let result = direct_search("", &OutputFormat::Json, None).await;
+        // Should succeed, Bun API handles empty queries
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_direct_search_markdown_with_file() {
+        let temp_dir = std::env::temp_dir();
+        let output_path = temp_dir.join("test_markdown_output.md");
+        let output_str = output_path.to_str().unwrap();
+
+        let result = direct_search("Bun", &OutputFormat::Markdown, Some(output_str)).await;
+        assert!(result.is_ok());
+
+        // Verify file was created
+        assert!(output_path.exists());
+
+        // Read and verify markdown format
+        let content = std::fs::read_to_string(&output_path).unwrap();
+        assert!(content.contains("# Bun Documentation Search Results"));
+
+        // Cleanup
+        let _ = std::fs::remove_file(&output_path);
     }
 }
