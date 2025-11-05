@@ -1,6 +1,6 @@
 [package]
 name = "bun-docs-mcp-proxy"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 description = "MCP proxy for Bun documentation search"
 repository = "https://github.com/kjanat/bun-docs-mcp-proxy"

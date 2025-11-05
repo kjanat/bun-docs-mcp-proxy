@@ -493,16 +493,25 @@ tasks:
 
   bump-patch:
     desc: Bump patch version (0.2.1 → 0.2.2)
+    preconditions:
+      - sh: command -v cargo-set-version
+        msg: "cargo-edit is required. Install with: cargo install cargo-edit"
     cmd: cargo set-version --bump patch
 
   bump-minor:
     desc: Bump minor version (0.2.1 → 0.3.0)
     prompt: Bump minor version (new features)?
+    preconditions:
+      - sh: command -v cargo-set-version
+        msg: "cargo-edit is required. Install with: cargo install cargo-edit"
     cmd: cargo set-version --bump minor
 
   bump-major:
     desc: Bump major version (0.2.1 → 1.0.0)
     prompt: Bump major version? This is a BREAKING change!
+    preconditions:
+      - sh: command -v cargo-set-version
+        msg: "cargo-edit is required. Install with: cargo install cargo-edit"
     cmd: cargo set-version --bump major
 
   # ===== Benchmarking & Profiling =====
