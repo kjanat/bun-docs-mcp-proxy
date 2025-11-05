@@ -43,13 +43,19 @@ tasks:
   build-release:
     desc: Build optimized release binary
     aliases: [br, release]
-    cmd: cargo build --release
+    cmds:
+      - cargo build --release
+      - defer: >
+          echo "Built {{.BINARY_NAME}} version {{.CURRENT_VERSION}} (commit {{.COMMIT_HASH}}) at {{.BUILD_TIME}}";
+          echo "Binary: ./{{.BUILD_DIR}}/{{.BINARY_NAME}}"
     sources:
       - src/**/*.rs
+      - tests/**/*.rs
       - Cargo.toml
       - Cargo.lock
     generates:
       - "{{.BUILD_DIR}}/{{.BINARY_NAME}}"
+    silent: true
 
   clean:
     desc: Remove build artifacts
@@ -62,14 +68,24 @@ tasks:
 
   # ===== Test Tasks =====
   test:
-    desc: Run all tests with all features
+    desc: Run all tests (unit tests only by default, no network calls)
     aliases: [t]
-    cmd: cargo test --all-features {{.CLI_ARGS}}
+    cmd: cargo test {{.CLI_ARGS}}
 
   test-unit:
-    desc: Run unit tests only
+    desc: Run unit tests only (fast, no network)
     aliases: [tu]
     cmd: cargo test --bins {{.CLI_ARGS}}
+
+  test-integration-only:
+    desc: Run integration tests with real API calls (requires network)
+    aliases: [tio]
+    cmd: cargo test --features integration-tests {{.CLI_ARGS}}
+
+  test-with-integration:
+    desc: Run all tests including integration tests (requires network)
+    aliases: [twi]
+    cmd: cargo test --features integration-tests --all-features {{.CLI_ARGS}}
 
   test-doc:
     desc: Run documentation tests (N/A for binary-only crates)
@@ -100,8 +116,13 @@ tasks:
 
   # ===== Coverage Tasks =====
   coverage:
-    desc: Generate HTML coverage report
+    desc: Get coverage info with llvm-cov
     aliases: [cov]
+    cmd: cargo llvm-cov --all-features --workspace {{.CLI_ARGS}}
+
+  coverage-html:
+    desc: Generate HTML coverage report
+    aliases: [covh]
     cmds:
       - cargo llvm-cov --html
       - defer: echo "Coverage report → {{.COVERAGE_DIR}}/index.html"
@@ -127,14 +148,34 @@ tasks:
   fmt-check:
     desc: Check code formatting
     aliases: [fc]
-    cmd: cargo fmt -- --check
+    cmd: cargo fmt --check --message-format short
 
   clippy:
     desc: Run clippy linter with all features
     aliases: [lint]
-    env:
-      RUSTFLAGS: -D warnings
-    cmd: cargo clippy --all-features --all-targets {{.CLI_ARGS}}
+    cmd: |
+      cargo clippy \
+        --all-features \
+        --all-targets \
+        {{.CLI_ARGS}}
+    # env:
+    #   RUSTFLAGS: -D warnings
+
+  clippy-strict:
+    desc: Run clippy linter with all features
+    aliases: [lint-strict]
+    cmd: |
+      cargo clippy \
+        --all-features \
+        --all-targets \
+        -- \
+        -W clippy::cargo \
+        -W clippy::nursery \
+        -W clippy::pedantic \
+        -W clippy::restriction \
+        {{.CLI_ARGS}}
+    # env:
+    #   RUSTFLAGS: -D warnings
 
   check:
     desc: Run all checks (fmt, clippy, tests)
@@ -169,7 +210,7 @@ tasks:
     desc: Search using release binary
     aliases: [sr]
     deps: [build-release]
-    cmd: "{{.BUILD_DIR}}/{{.BINARY_NAME}} --search {{.CLI_ARGS}} | jq -r '.[]?[1]?.text'"
+    cmd: '{{.BUILD_DIR}}/{{.BINARY_NAME}} --search "{{.CLI_ARGS}}" | jq -r ''.[]?[1]?.text'''
 
   # ===== Manual MCP Protocol Tests =====
   test-mcp-init:
@@ -272,6 +313,9 @@ tasks:
       TARGET: x86_64-unknown-linux-gnu
       NAME: linux-x86_64
     deps: [build-linux-gnu]
+    preconditions:
+      - sh: command -v tar
+        msg: "tar is required to create packages"
     dir: target/{{.TARGET}}/release
     cmd: tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
 
@@ -281,6 +325,9 @@ tasks:
       TARGET: aarch64-unknown-linux-gnu
       NAME: linux-aarch64
     deps: [build-linux-arm64]
+    preconditions:
+      - sh: command -v tar
+        msg: "tar is required to create packages"
     dir: target/{{.TARGET}}/release
     cmd: tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
 
@@ -290,6 +337,9 @@ tasks:
       TARGET: x86_64-unknown-linux-musl
       NAME: linux-x86_64-musl
     deps: [build-linux-musl]
+    preconditions:
+      - sh: command -v tar
+        msg: "tar is required to create packages"
     dir: target/{{.TARGET}}/release
     cmd: tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
 
@@ -299,8 +349,11 @@ tasks:
       TARGET: aarch64-unknown-linux-musl
       NAME: linux-aarch64-musl
     deps: [build-linux-arm64-musl]
+    preconditions:
+      - sh: command -v tar
+        msg: "tar is required to create packages"
     dir: target/{{.TARGET}}/release
-    cmd: cd target/{{.TARGET}}/release && tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
+    cmd: tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
 
   package-macos-intel:
     desc: Package macOS Intel binary as tar.gz
@@ -309,6 +362,9 @@ tasks:
       TARGET: x86_64-apple-darwin
       NAME: macos-x86_64
     deps: [build-macos-intel]
+    preconditions:
+      - sh: command -v tar
+        msg: "tar is required to create packages"
     dir: target/{{.TARGET}}/release
     cmd: tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
 
@@ -319,6 +375,9 @@ tasks:
       TARGET: aarch64-apple-darwin
       NAME: macos-aarch64
     deps: [build-macos-arm]
+    preconditions:
+      - sh: command -v tar
+        msg: "tar is required to create packages"
     dir: target/{{.TARGET}}/release
     cmd: tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
 
@@ -329,6 +388,9 @@ tasks:
       TARGET: x86_64-pc-windows-msvc
       NAME: windows-x86_64
     deps: [build-windows]
+    preconditions:
+      - sh: command -v 7z
+        msg: "7z is required to create zip packages"
     dir: target/{{.TARGET}}/release
     cmd: 7z a {{.BINARY_NAME}}-{{.NAME}}.zip {{.BINARY_NAME}}.exe
 
@@ -339,6 +401,9 @@ tasks:
       TARGET: aarch64-pc-windows-msvc
       NAME: windows-aarch64
     deps: [build-windows-arm]
+    preconditions:
+      - sh: command -v 7z
+        msg: "7z is required to create zip packages"
     dir: target/{{.TARGET}}/release
     cmd: 7z a {{.BINARY_NAME}}-{{.NAME}}.zip {{.BINARY_NAME}}.exe
 
@@ -374,6 +439,7 @@ tasks:
     watch: true
     sources:
       - src/**/*.rs
+      - tests/**/*.rs
       - Cargo.toml
       - Cargo.lock
     cmds:
@@ -391,6 +457,7 @@ tasks:
       - task: test-integration
       - task: fmt-check
       - task: clippy
+    silent: true
 
   ci-coverage:
     desc: Run CI coverage workflow locally
@@ -399,6 +466,7 @@ tasks:
     cmds:
       - task: test-nextest
       - task: coverage-nextest
+    silent: true
 
   ci-lint:
     desc: Run CI lint workflow locally
@@ -407,6 +475,7 @@ tasks:
     cmds:
       - task: fmt-check
       - task: clippy
+    silent: true
 
   ci-all:
     desc: Run complete CI pipeline locally
@@ -414,6 +483,7 @@ tasks:
       - task: ci
       - task: ci-coverage
       - task: ci-lint
+    silent: true
 
   # ===== Version Management =====
   version:
@@ -423,16 +493,25 @@ tasks:
 
   bump-patch:
     desc: Bump patch version (0.2.1 → 0.2.2)
+    preconditions:
+      - sh: command -v cargo-set-version
+        msg: "cargo-edit is required. Install with: cargo install cargo-edit"
     cmd: cargo set-version --bump patch
 
   bump-minor:
     desc: Bump minor version (0.2.1 → 0.3.0)
     prompt: Bump minor version (new features)?
+    preconditions:
+      - sh: command -v cargo-set-version
+        msg: "cargo-edit is required. Install with: cargo install cargo-edit"
     cmd: cargo set-version --bump minor
 
   bump-major:
     desc: Bump major version (0.2.1 → 1.0.0)
     prompt: Bump major version? This is a BREAKING change!
+    preconditions:
+      - sh: command -v cargo-set-version
+        msg: "cargo-edit is required. Install with: cargo install cargo-edit"
     cmd: cargo set-version --bump major
 
   # ===== Benchmarking & Profiling =====

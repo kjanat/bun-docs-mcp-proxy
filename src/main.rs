@@ -12,7 +12,7 @@
 //! ## Supported JSON-RPC Methods
 //!
 //! - `initialize` - Initialize MCP connection, returns protocol version and capabilities
-//! - `tools/list` - List available tools (returns SearchBun tool)
+//! - `tools/list` - List available tools (returns `SearchBun` tool)
 //! - `tools/call` - Execute a tool with parameters (forwarded to Bun Docs API)
 //! - `resources/list` - List available resources (returns Bun Documentation resource)
 //! - `resources/read` - Read a resource by URI (e.g., `bun://docs?query=Bun.serve`)
@@ -29,35 +29,129 @@ mod protocol;
 mod transport;
 
 use anyhow::Result;
+use clap::{Parser, ValueEnum};
+use core::fmt::Write as _;
 use protocol::{JsonRpcRequest, JsonRpcResponse};
-use tracing::{error, info};
+use std::fs;
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
-// JSON-RPC error codes
+/// Standard JSON-RPC 2.0 error code for parse errors (invalid JSON).
 const JSONRPC_PARSE_ERROR: i32 = -32700;
+/// Standard JSON-RPC 2.0 error code for invalid parameters.
 const JSONRPC_INVALID_PARAMS: i32 = -32602;
+/// Standard JSON-RPC 2.0 error code for internal errors.
 const JSONRPC_INTERNAL_ERROR: i32 = -32603;
+/// Standard JSON-RPC 2.0 error code for method not found errors.
 const JSONRPC_METHOD_NOT_FOUND: i32 = -32601;
 
-/// Extract a required string parameter from JSON-RPC params
-fn get_string_param<'a>(params: &'a serde_json::Value, key: &str) -> Result<&'a str, String> {
+/// Output format for CLI search results
+#[derive(Debug, Clone, ValueEnum)]
+enum OutputFormat {
+    /// JSON format (default)
+    Json,
+    /// Plain text format
+    Text,
+    /// Markdown format
+    Markdown,
+}
+
+/// Bun Docs MCP Proxy - Protocol adapter and CLI for Bun documentation
+#[derive(Parser, Debug)]
+#[command(
+    author,
+    version,
+    about,
+    long_about = None,
+    after_help = r#"EXAMPLES:
+    # Search Bun documentation for "serve" keyword
+    bun-docs-mcp-proxy --search "Bun.serve"
+
+    # Save results as markdown
+    bun-docs-mcp-proxy -s "HTTP server" -f markdown -o results.md
+
+    # Export as JSON for processing
+    bun-docs-mcp-proxy --search "WebSocket" --format json --output ws-docs.json
+
+    # Run as MCP server (default mode, reads from stdin)
+    bun-docs-mcp-proxy
+
+ENVIRONMENT:
+    RUST_LOG    Set logging level (debug, info, warn, error)
+                Example: RUST_LOG=debug bun-docs-mcp-proxy -s "test"
+
+MCP SERVER MODE:
+    When run without --search, operates as an MCP (Model Context Protocol) server
+    reading JSON-RPC requests from stdin and writing responses to stdout."#
+)]
+struct Cli {
+    /// Search query for Bun documentation (enables CLI mode)
+    #[arg(short, long)]
+    search: Option<String>,
+
+    /// Output file path (default: stdout)
+    #[arg(short, long)]
+    output: Option<String>,
+
+    /// Output format
+    #[arg(short, long, value_enum, default_value_t = OutputFormat::Json)]
+    format: OutputFormat,
+}
+
+/// Extracts a required string parameter from a `serde_json::Value` representing JSON-RPC parameters.
+///
+/// This helper function safely retrieves a string value associated with a given key
+/// from a JSON object. It returns an error if the key is missing, or if the value
+/// is not a string.
+///
+/// # Arguments
+/// * `params` - A reference to the `serde_json::Value` (expected to be an object)
+///   containing the parameters.
+/// * `key` - The name of the string parameter to extract.
+///
+/// # Returns
+/// A `Result` which on success contains a string slice (`&str`) of the parameter's value.
+/// On failure, it returns a `String` describing the error.
+fn get_string_param<'value>(
+    params: &'value serde_json::Value,
+    key: &str,
+) -> Result<&'value str, String> {
     params
         .get(key)
         .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("Missing or invalid {} parameter", key))
+        .ok_or_else(|| format!("Missing or invalid {key} parameter"))
 }
 
-/// Parse a Bun docs URI and extract the search query
+/// Parses a Bun documentation URI (e.g., `bun://docs?query=example`) and extracts the search query.
+///
+/// This function handles URIs for Bun documentation, specifically looking for the
+/// `bun://docs?query=` prefix to extract the query string. It also supports
+/// `bun://docs` for an empty query.
+///
+/// # Arguments
+/// * `uri` - The URI string to parse.
+///
+/// # Returns
+/// A `Result` which on success contains the extracted search query as a `String`.
+/// On failure, it returns a `String` describing the invalid URI format.
+#[allow(
+    clippy::option_if_let_else,
+    reason = "clearer with explicit if-let-else pattern"
+)]
 fn parse_bun_docs_uri(uri: &str) -> Result<String, String> {
     if let Some(query_part) = uri.strip_prefix("bun://docs?query=") {
-        Ok(query_part.to_string())
+        Ok(query_part.to_owned())
     } else if uri == "bun://docs" {
-        Ok("".to_string())
+        Ok(String::new())
     } else {
-        Err(format!("Invalid URI format: {}", uri))
+        Err(format!("Invalid URI format: {uri}"))
     }
 }
 
+/// Initializes the `tracing` subscriber for logging.
+///
+/// This function sets up `tracing_subscriber` to filter logs based on the `RUST_LOG`
+/// environment variable (defaulting to `info` if not set) and directs output to `stderr`.
 fn init_logging() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -68,90 +162,279 @@ fn init_logging() {
         .init();
 }
 
-fn print_version() {
-    println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+/// Extracts all text content from a search result's `content` array.
+///
+/// The search result is expected to be a JSON object with a `content` field,
+/// which is an array of objects, each with a `text` field.
+///
+/// # Arguments
+/// * `result` - A reference to the `serde_json::Value` representing the search result.
+///
+/// # Returns
+/// A `Vec<&str>` containing all the extracted text slices. Returns an empty vector
+/// if `content` is missing or not an array.
+fn extract_content_texts(result: &serde_json::Value) -> Vec<&str> {
+    result
+        .get("content")
+        .and_then(|c| c.as_array())
+        .map(|content| {
+            content
+                .iter()
+                .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
-fn print_help() {
-    println!(
-        "{} {} - {}
-
-USAGE:
-    {} [FLAGS]
-
-FLAGS:
-    -h, --help       Print help information
-    -V, --version    Print version information
-
-DESCRIPTION:
-    MCP (Model Context Protocol) proxy for Bun documentation search.
-
-    Acts as a protocol adapter that receives JSON-RPC 2.0 requests over stdin,
-    forwards them to the Bun documentation HTTP API at https://bun.com/docs/mcp,
-    parses SSE (Server-Sent Events) responses, and returns JSON-RPC responses
-    over stdout.
-
-SUPPORTED METHODS:
-    initialize       Initialize the MCP connection
-    tools/list       List available tools (SearchBun)
-    tools/call       Call a tool with parameters
-    resources/list   List available resources (Bun Documentation)
-    resources/read   Read a resource by URI
-
-ENVIRONMENT VARIABLES:
-    RUST_LOG         Set logging level (debug, info, warn, error)
-
-EXAMPLES:
-    # Start the proxy (typically called by an MCP client)
-    {}
-
-    # Start with debug logging
-    RUST_LOG=debug {}
-
-    # Test tools/call method
-    echo '{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{{\"name\":\"SearchBun\",\"arguments\":{{\"query\":\"Bun.serve\"}}}}}}' | {}",
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION"),
-        env!("CARGO_PKG_DESCRIPTION"),
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_NAME")
-    );
+/// Represents a single documentation entry, which may have a URL for fetching the
+/// full content and always has fallback text from the initial search result.
+struct DocEntry<'text> {
+    /// An optional URL to the full documentation page.
+    url: Option<String>,
+    /// The fallback text content, extracted from the search result.
+    text: &'text str,
 }
 
-fn handle_args(args: &[String]) -> bool {
-    // Check for flags (skip first arg which is program name)
-    if let Some(arg) = args.get(1) {
-        match arg.as_str() {
-            "-h" | "--help" => {
-                print_help();
-                return true;
+/// Parses search result content to create a vector of `DocEntry` structs.
+///
+/// This function iterates through the text content of a search result, looking for
+/// `Link:` annotations to extract URLs. It creates a `DocEntry` for each piece of
+/// content, containing the URL (if found) and the original text as a fallback.
+///
+/// # Arguments
+/// * `result` - A reference to the `serde_json::Value` representing the search result.
+///
+/// # Returns
+/// A `Vec<DocEntry>` containing the parsed documentation entries.
+fn extract_doc_entries(result: &serde_json::Value) -> Vec<DocEntry<'_>> {
+    let texts = extract_content_texts(result);
+
+    texts
+        .into_iter()
+        .map(|text| {
+            // Parse "Link: <URL>" pattern
+            let url = text.lines().find_map(|line| {
+                let trimmed = line.trim();
+                trimmed
+                    .strip_prefix("Link: ")
+                    .map(|url_part| url_part.trim().to_owned())
+            });
+
+            DocEntry { url, text }
+        })
+        .collect()
+}
+
+/// Formats a search result as a pretty-printed JSON string.
+///
+/// # Arguments
+/// * `result` - A reference to the `serde_json::Value` to format.
+///
+/// # Returns
+/// A `Result` containing the formatted JSON string, or an error if serialization fails.
+fn format_json(result: &serde_json::Value) -> Result<String> {
+    Ok(serde_json::to_string_pretty(result)?)
+}
+
+/// Formats a search result as a plain text string.
+///
+/// It extracts the text content from the result and joins it with newlines.
+/// If no text content is found, it falls back to a pretty-printed JSON representation.
+///
+/// # Arguments
+/// * `result` - A reference to the `serde_json::Value` to format.
+///
+/// # Returns
+/// A `Result` containing the formatted plain text string.
+fn format_text(result: &serde_json::Value) -> Result<String> {
+    let texts = extract_content_texts(result);
+
+    if texts.is_empty() {
+        Ok(serde_json::to_string_pretty(result)?)
+    } else {
+        Ok(texts.join("\n\n"))
+    }
+}
+
+/// Formats a search result as a Markdown string by fetching the raw MDX content from URLs.
+///
+/// This function extracts `DocEntry` items from the search result. For each entry with a URL,
+/// it attempts to fetch the full MDX content. If successful, the content is included with a source
+/// comment. If the fetch fails or no URL is present, it falls back to the entry's text.
+/// The final output joins all parts with Markdown horizontal rules.
+///
+/// # Arguments
+/// * `result` - A reference to the `serde_json::Value` representing the search result.
+/// * `client` - A reference to the `BunDocsClient` for fetching MDX content.
+///
+/// # Returns
+/// A `Result` containing the aggregated and formatted Markdown string.
+async fn format_markdown(
+    result: &serde_json::Value,
+    client: &http::BunDocsClient,
+) -> Result<String> {
+    let doc_entries = extract_doc_entries(result);
+
+    if doc_entries.is_empty() {
+        // No content found, fallback to JSON display
+        let mut output = String::new();
+        output.push_str("```json\n");
+        output.push_str(&serde_json::to_string_pretty(result)?);
+        output.push_str("\n```\n");
+        return Ok(output);
+    }
+
+    let mut mdx_parts = Vec::new();
+
+    for entry in doc_entries {
+        if let Some(url) = entry.url {
+            // Try to fetch MDX from the URL
+            let fetch_result = client.fetch_doc_markdown(&url).await;
+            match fetch_result {
+                Ok(mdx) => {
+                    // Success: include URL comment and MDX content
+                    let mut part = String::new();
+                    write!(part, "<!-- Source: {url} -->\n\n").unwrap();
+                    part.push_str(&mdx);
+                    mdx_parts.push(part);
+                }
+                Err(e) => {
+                    // Error: include error comment and fallback to original text
+                    warn!("Failed to fetch MDX from {url}: {e}");
+                    let mut part = String::new();
+                    write!(part, "<!-- Error: {e} -->\n\n").unwrap();
+                    part.push_str(entry.text);
+                    mdx_parts.push(part);
+                }
             }
-            "-V" | "--version" => {
-                print_version();
-                return true;
-            }
-            _ => {
-                eprintln!("Unknown argument: {}", arg);
-                eprintln!("Use --help for usage information");
-                std::process::exit(1);
-            }
+        } else {
+            // No URL found, use original text content
+            mdx_parts.push(entry.text.to_owned());
         }
     }
 
-    false
+    // Join with horizontal rules and two newlines
+    Ok(mdx_parts.join("\n\n---\n\n"))
+}
+
+/// Validates a file path to ensure it does not contain directory traversal components (e.g., `..`).
+///
+/// This is a security measure to prevent writing files outside of the intended directory.
+///
+/// # Arguments
+/// * `path` - The file path string to validate.
+///
+/// # Returns
+/// An `Ok(())` if the path is valid, or an `Err(String)` if it contains traversal components.
+fn validate_output_path(path: &str) -> Result<(), String> {
+    let path_obj = std::path::Path::new(path);
+
+    // Reject absolute paths
+    if path_obj.is_absolute() {
+        return Err("Output path must be relative".to_owned());
+    }
+
+    // Check for directory traversal attempts
+    for component in path_obj.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err("Output path cannot contain '..' (directory traversal)".to_owned());
+        }
+    }
+
+    Ok(())
+}
+
+/// Executes a search query in CLI mode, formats the result, and writes it to the specified output.
+///
+/// This function orchestrates the CLI search functionality. It builds and sends a `tools/call`
+/// request to the Bun Docs API, formats the response according to the user's choice
+/// (JSON, text, or Markdown), and writes the output to a file or `stdout`.
+///
+/// # Arguments
+/// * `query` - The search query string.
+/// * `format` - The desired `OutputFormat` for the results.
+/// * `output_path` - An optional file path to write the output to. If `None`, output is written to `stdout`.
+///
+/// # Returns
+/// An `anyhow::Result<()>` indicating success or failure.
+async fn direct_search(
+    query: &str,
+    format: &OutputFormat,
+    output_path: Option<&str>,
+) -> Result<()> {
+    // Validate query is not empty
+    if query.trim().is_empty() {
+        return Err(anyhow::anyhow!("Search query cannot be empty"));
+    }
+
+    let client = http::BunDocsClient::new();
+
+    // Validate output path if provided
+    if let Some(path) = output_path {
+        validate_output_path(path).map_err(|e| anyhow::anyhow!("Invalid output path: {e}"))?;
+    }
+
+    // Build search request
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "SearchBun",
+            "arguments": {
+                "query": query
+            }
+        }
+    });
+
+    // Execute search
+    let result = client.forward_request(request).await?;
+
+    // Check for API error response
+    if let Some(error) = result.get("error") {
+        let error_msg = error
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("Unknown error");
+        return Err(anyhow::anyhow!("API error: {error_msg}"));
+    }
+
+    // Extract result field if present
+    let search_result = result.get("result").unwrap_or(&result);
+
+    // Format output
+    let formatted = match format {
+        OutputFormat::Json => format_json(search_result)?,
+        OutputFormat::Text => format_text(search_result)?,
+        OutputFormat::Markdown => format_markdown(search_result, &client).await?,
+    };
+
+    // Write output
+    if let Some(path) = output_path {
+        let bytes_written = formatted.len();
+        fs::write(path, &formatted)?;
+        eprintln!("Output written to: {path} ({bytes_written} bytes)");
+    } else {
+        println!("{formatted}");
+    }
+
+    Ok(())
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Handle command-line arguments before starting the proxy
-    let args: Vec<String> = std::env::args().collect();
-    if handle_args(&args) {
-        return Ok(());
+    // Parse CLI arguments
+    let cli = Cli::parse();
+
+    // Initialize logging early for both CLI and server modes
+    init_logging();
+
+    // CLI search mode
+    if let Some(query) = &cli.search {
+        return direct_search(query, &cli.format, cli.output.as_deref()).await;
     }
 
-    init_logging();
+    // MCP server mode
     info!("Bun Docs MCP Proxy starting");
 
     let mut transport = transport::StdioTransport::new();
@@ -159,7 +442,8 @@ async fn main() -> Result<()> {
 
     loop {
         // Read JSON-RPC request from stdin
-        let message = match transport.read_message().await {
+        let read_result = transport.read_message().await;
+        let message = match read_result {
             Ok(Some(msg)) => msg,
             Ok(None) => {
                 info!("Connection closed");
@@ -179,10 +463,11 @@ async fn main() -> Result<()> {
                 let error_response = JsonRpcResponse::error(
                     serde_json::Value::Null,
                     JSONRPC_PARSE_ERROR,
-                    format!("Parse error: {}", e),
+                    format!("Parse error: {e}"),
                 );
                 if let Ok(response_str) = serde_json::to_string(&error_response) {
-                    let _ = transport.write_message(&response_str).await;
+                    let write_result = transport.write_message(&response_str).await;
+                    let _ = write_result;
                 }
                 continue;
             }
@@ -202,15 +487,17 @@ async fn main() -> Result<()> {
                 JsonRpcResponse::error(
                     request.id,
                     JSONRPC_METHOD_NOT_FOUND,
-                    format!("Method not found: {}", method),
+                    format!("Method not found: {method}"),
                 )
             }
         };
 
         // Send response back to stdout
-        match serde_json::to_string(&response) {
+        let serialize_result = serde_json::to_string(&response);
+        match serialize_result {
             Ok(response_str) => {
-                if let Err(e) = transport.write_message(&response_str).await {
+                let write_result = transport.write_message(&response_str).await;
+                if let Err(e) = write_result {
                     error!("Failed to write response: {}", e);
                     break;
                 }
@@ -225,6 +512,18 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Handles a `tools/call` JSON-RPC request by forwarding it to the Bun Docs API.
+///
+/// This function takes an incoming `tools/call` request, constructs a new request
+/// with the same parameters, and sends it to the Bun Docs API via the `BunDocsClient`.
+/// It then processes the response, extracting the `result` field on success.
+///
+/// # Arguments
+/// * `client` - A reference to the `BunDocsClient` for making the API call.
+/// * `request` - A reference to the incoming `JsonRpcRequest`.
+///
+/// # Returns
+/// A `JsonRpcResponse` to be sent back to the client.
 async fn handle_tools_call(
     client: &http::BunDocsClient,
     request: &JsonRpcRequest,
@@ -243,6 +542,10 @@ async fn handle_tools_call(
 
             // Based on protocol analysis, the SSE data contains
             // the complete JSON-RPC response. Extract the result field.
+            #[allow(
+                clippy::option_if_let_else,
+                reason = "clearer with explicit pattern match"
+            )]
             if let Some(result_field) = result.get("result") {
                 JsonRpcResponse::success(request.id.clone(), result_field.clone())
             } else {
@@ -254,12 +557,21 @@ async fn handle_tools_call(
             JsonRpcResponse::error(
                 request.id.clone(),
                 JSONRPC_INTERNAL_ERROR,
-                format!("Internal error: {}", e),
+                format!("Internal error: {e}"),
             )
         }
     }
 }
 
+/// Handles a `tools/list` JSON-RPC request by returning a static list of available tools.
+///
+/// Currently, this returns a single tool: `SearchBun`.
+///
+/// # Arguments
+/// * `request` - A reference to the incoming `JsonRpcRequest`.
+///
+/// # Returns
+/// A `JsonRpcResponse` containing the list of tools.
 fn handle_tools_list(request: &JsonRpcRequest) -> JsonRpcResponse {
     // Return available tools
     let tools = serde_json::json!({
@@ -282,6 +594,15 @@ fn handle_tools_list(request: &JsonRpcRequest) -> JsonRpcResponse {
     JsonRpcResponse::success(request.id.clone(), tools)
 }
 
+/// Handles a `resources/list` JSON-RPC request by returning a static list of available resources.
+///
+/// Currently, this returns a single resource: `bun://docs`.
+///
+/// # Arguments
+/// * `request` - A reference to the incoming `JsonRpcRequest`.
+///
+/// # Returns
+/// A `JsonRpcResponse` containing the list of resources.
 fn handle_resources_list(request: &JsonRpcRequest) -> JsonRpcResponse {
     // Return available resources
     let resources = serde_json::json!({
@@ -296,20 +617,29 @@ fn handle_resources_list(request: &JsonRpcRequest) -> JsonRpcResponse {
     JsonRpcResponse::success(request.id.clone(), resources)
 }
 
+/// Handles a `resources/read` JSON-RPC request.
+///
+/// This function parses the `uri` from the request parameters, extracts a search query
+/// from it, and then internally forwards the request as a `tools/call` to the
+/// `SearchBun` tool. The result from the API is then wrapped in the MCP resource format.
+///
+/// # Arguments
+/// * `client` - A reference to the `BunDocsClient` for making the API call.
+/// * `request` - A reference to the incoming `JsonRpcRequest`.
+///
+/// # Returns
+/// A `JsonRpcResponse` containing the resource content or an error.
 async fn handle_resources_read(
     client: &http::BunDocsClient,
     request: &JsonRpcRequest,
 ) -> JsonRpcResponse {
     // Extract and validate params
-    let params = match &request.params {
-        Some(p) => p,
-        None => {
-            return JsonRpcResponse::error(
-                request.id.clone(),
-                JSONRPC_INVALID_PARAMS,
-                "Missing params".to_string(),
-            );
-        }
+    let Some(params) = &request.params else {
+        return JsonRpcResponse::error(
+            request.id.clone(),
+            JSONRPC_INVALID_PARAMS,
+            "Missing params".to_owned(),
+        );
     };
 
     // Extract URI parameter
@@ -355,7 +685,7 @@ async fn handle_resources_read(
                     return JsonRpcResponse::error(
                         request.id.clone(),
                         JSONRPC_INTERNAL_ERROR,
-                        format!("Failed to serialize resource: {}", e),
+                        format!("Failed to serialize resource: {e}"),
                     );
                 }
             };
@@ -376,12 +706,20 @@ async fn handle_resources_read(
             JsonRpcResponse::error(
                 request.id.clone(),
                 JSONRPC_INTERNAL_ERROR,
-                format!("Internal error: {}", e),
+                format!("Internal error: {e}"),
             )
         }
     }
 }
 
+/// Handles an `initialize` JSON-RPC request by returning the protocol version,
+/// capabilities, and server information.
+///
+/// # Arguments
+/// * `request` - A reference to the incoming `JsonRpcRequest`.
+///
+/// # Returns
+/// A `JsonRpcResponse` containing the initialization result.
 fn handle_initialize(request: &JsonRpcRequest) -> JsonRpcResponse {
     // Handle MCP initialize request
     let init_result = serde_json::json!({
@@ -400,459 +738,4 @@ fn handle_initialize(request: &JsonRpcRequest) -> JsonRpcResponse {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn test_handle_initialize() {
-        let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            id: json!(1),
-            method: "initialize".to_string(),
-            params: None,
-        };
-
-        let response = handle_initialize(&request);
-        let serialized = serde_json::to_value(&response).unwrap();
-
-        assert_eq!(serialized["id"], 1);
-        assert_eq!(serialized["result"]["protocolVersion"], "2024-11-05");
-        assert_eq!(
-            serialized["result"]["serverInfo"]["name"],
-            "bun-docs-mcp-proxy"
-        );
-        assert!(serialized["result"]["capabilities"]["tools"].is_object());
-    }
-
-    #[test]
-    fn test_handle_tools_list() {
-        let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            id: json!("test-id"),
-            method: "tools/list".to_string(),
-            params: None,
-        };
-
-        let response = handle_tools_list(&request);
-        let serialized = serde_json::to_value(&response).unwrap();
-
-        assert_eq!(serialized["id"], "test-id");
-        assert!(serialized["result"]["tools"].is_array());
-
-        let tools = serialized["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["name"], "SearchBun");
-        assert_eq!(
-            tools[0]["inputSchema"]["properties"]["query"]["type"],
-            "string"
-        );
-    }
-
-    #[test]
-    fn test_parse_valid_jsonrpc_request() {
-        let message = r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#;
-        let request: Result<JsonRpcRequest, _> = serde_json::from_str(message);
-
-        assert!(request.is_ok());
-        let req = request.unwrap();
-        assert_eq!(req.method, "initialize");
-        assert_eq!(req.id, json!(1));
-    }
-
-    #[test]
-    fn test_parse_invalid_jsonrpc_request() {
-        let message = r#"{"invalid json"#;
-        let request: Result<JsonRpcRequest, _> = serde_json::from_str(message);
-
-        assert!(request.is_err());
-    }
-
-    #[test]
-    fn test_error_response_codes() {
-        // Test parse error
-        let parse_error = JsonRpcResponse::error(json!(1), -32700, "Parse error".to_string());
-        let serialized = serde_json::to_value(&parse_error).unwrap();
-        assert_eq!(serialized["error"]["code"], -32700);
-
-        // Test method not found
-        let method_error = JsonRpcResponse::error(json!(2), -32601, "Method not found".to_string());
-        let serialized = serde_json::to_value(&method_error).unwrap();
-        assert_eq!(serialized["error"]["code"], -32601);
-
-        // Test internal error
-        let internal_error = JsonRpcResponse::error(json!(3), -32603, "Internal error".to_string());
-        let serialized = serde_json::to_value(&internal_error).unwrap();
-        assert_eq!(serialized["error"]["code"], -32603);
-    }
-
-    #[test]
-    fn test_response_serialization() {
-        let response = JsonRpcResponse::success(json!("test-id"), json!({"result": "data"}));
-        let serialized = serde_json::to_string(&response);
-
-        assert!(serialized.is_ok());
-        let json_str = serialized.unwrap();
-        assert!(json_str.contains("\"jsonrpc\":\"2.0\""));
-        assert!(json_str.contains("\"id\":\"test-id\""));
-    }
-
-    #[test]
-    fn test_handle_tools_list_structure() {
-        let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            id: json!(1),
-            method: "tools/list".to_string(),
-            params: None,
-        };
-
-        let response = handle_tools_list(&request);
-        let serialized = serde_json::to_value(&response).unwrap();
-
-        // Verify required fields
-        assert!(serialized["result"]["tools"].is_array());
-        let tools = serialized["result"]["tools"].as_array().unwrap();
-        assert!(!tools.is_empty());
-
-        // Verify tool structure
-        let tool = &tools[0];
-        assert!(tool["name"].is_string());
-        assert!(tool["description"].is_string());
-        assert!(tool["inputSchema"]["type"].is_string());
-        assert_eq!(tool["inputSchema"]["type"], "object");
-    }
-
-    #[test]
-    fn test_initialize_response_version() {
-        let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            id: json!(1),
-            method: "initialize".to_string(),
-            params: None,
-        };
-
-        let response = handle_initialize(&request);
-        let serialized = serde_json::to_value(&response).unwrap();
-
-        // Verify protocol version matches MCP spec
-        assert_eq!(serialized["result"]["protocolVersion"], "2024-11-05");
-        // Verify both capabilities are present
-        assert!(serialized["result"]["capabilities"]["tools"].is_object());
-        assert!(serialized["result"]["capabilities"]["resources"].is_object());
-    }
-
-    #[test]
-    fn test_handle_resources_list() {
-        let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            id: json!("res-list"),
-            method: "resources/list".to_string(),
-            params: None,
-        };
-
-        let response = handle_resources_list(&request);
-        let serialized = serde_json::to_value(&response).unwrap();
-
-        assert_eq!(serialized["id"], "res-list");
-        assert!(serialized["result"]["resources"].is_array());
-
-        let resources = serialized["result"]["resources"].as_array().unwrap();
-        assert_eq!(resources.len(), 1);
-        assert_eq!(resources[0]["uri"], "bun://docs");
-        assert_eq!(resources[0]["name"], "Bun Documentation");
-        assert_eq!(resources[0]["mimeType"], "application/json");
-    }
-
-    #[test]
-    fn test_jsonrpc_request_with_params() {
-        let message = r#"{"jsonrpc":"2.0","id":1,"method":"test","params":{"key":"value"}}"#;
-        let request: JsonRpcRequest = serde_json::from_str(message).unwrap();
-
-        assert!(request.params.is_some());
-        let params = request.params.unwrap();
-        assert_eq!(params["key"], "value");
-    }
-
-    #[test]
-    fn test_response_null_id() {
-        let response = JsonRpcResponse::error(json!(null), -32700, "Error".to_string());
-        let serialized = serde_json::to_value(&response).unwrap();
-
-        assert!(serialized["id"].is_null());
-    }
-
-    #[tokio::test]
-    async fn test_handle_tools_call_real_api() {
-        let client = http::BunDocsClient::new();
-        let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            id: json!(1),
-            method: "tools/call".to_string(),
-            params: Some(json!({
-                "name": "SearchBun",
-                "arguments": {
-                    "query": "Bun.serve"
-                }
-            })),
-        };
-
-        let response = handle_tools_call(&client, &request).await;
-        let serialized = serde_json::to_value(&response).unwrap();
-
-        assert!(serialized["result"].is_object());
-        assert!(serialized["result"]["content"].is_array());
-    }
-
-    #[tokio::test]
-    async fn test_handle_tools_call_empty_query() {
-        // NOTE: This test reflects Bun API's current behavior for empty query.
-        // As of now, Bun returns {"content":[{"text":"No results found","type":"text"}],"isError":true}
-        // If Bun changes this behavior (e.g., returns docs overview), update expected output accordingly.
-        let client = http::BunDocsClient::new();
-        let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            id: json!(2),
-            method: "tools/call".to_string(),
-            params: Some(json!({
-                "name": "SearchBun",
-                "arguments": {
-                    "query": ""
-                }
-            })),
-        };
-
-        let response = handle_tools_call(&client, &request).await;
-        let serialized = serde_json::to_value(&response).unwrap();
-
-        // Proxy should forward successfully; Bun API decides what empty query means
-        assert!(serialized["result"].is_object());
-    }
-
-    #[tokio::test]
-    async fn test_handle_resources_read_with_query() {
-        let client = http::BunDocsClient::new();
-        let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            id: json!("res1"),
-            method: "resources/read".to_string(),
-            params: Some(json!({"uri": "bun://docs?query=Bun.serve"})),
-        };
-
-        let response = handle_resources_read(&client, &request).await;
-        let serialized = serde_json::to_value(&response).unwrap();
-
-        assert!(serialized["result"]["contents"].is_array());
-        let contents = serialized["result"]["contents"].as_array().unwrap();
-        assert_eq!(contents.len(), 1);
-        assert_eq!(contents[0]["uri"], "bun://docs?query=Bun.serve");
-        assert_eq!(contents[0]["mimeType"], "application/json");
-    }
-
-    #[tokio::test]
-    async fn test_handle_resources_read_empty_query() {
-        // NOTE: Tests bun://docs (no query param) which proxy converts to empty query string.
-        // Bun API currently returns "No results found" for empty queries.
-        // If Bun changes to return overview/help for empty query, this test still passes (valid contents array).
-        let client = http::BunDocsClient::new();
-        let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            id: json!("res2"),
-            method: "resources/read".to_string(),
-            params: Some(json!({"uri": "bun://docs"})),
-        };
-
-        let response = handle_resources_read(&client, &request).await;
-        let serialized = serde_json::to_value(&response).unwrap();
-
-        assert!(serialized["result"]["contents"].is_array());
-    }
-
-    #[tokio::test]
-    async fn test_handle_resources_read_missing_params() {
-        let client = http::BunDocsClient::new();
-        let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            id: json!("res3"),
-            method: "resources/read".to_string(),
-            params: None,
-        };
-
-        let response = handle_resources_read(&client, &request).await;
-        let serialized = serde_json::to_value(&response).unwrap();
-
-        assert!(serialized["error"].is_object());
-        assert_eq!(serialized["error"]["code"], -32602);
-        assert!(
-            serialized["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("Missing params")
-        );
-    }
-
-    #[tokio::test]
-    async fn test_handle_resources_read_invalid_uri() {
-        let client = http::BunDocsClient::new();
-        let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            id: json!("res4"),
-            method: "resources/read".to_string(),
-            params: Some(json!({"uri": "invalid://uri"})),
-        };
-
-        let response = handle_resources_read(&client, &request).await;
-        let serialized = serde_json::to_value(&response).unwrap();
-
-        assert!(serialized["error"].is_object());
-        assert_eq!(serialized["error"]["code"], -32602);
-        assert!(
-            serialized["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("Invalid URI format")
-        );
-    }
-
-    #[tokio::test]
-    async fn test_handle_resources_read_missing_uri_param() {
-        let client = http::BunDocsClient::new();
-        let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            id: json!("res5"),
-            method: "resources/read".to_string(),
-            params: Some(json!({"other": "value"})),
-        };
-
-        let response = handle_resources_read(&client, &request).await;
-        let serialized = serde_json::to_value(&response).unwrap();
-
-        assert!(serialized["error"].is_object());
-        assert_eq!(serialized["error"]["code"], -32602);
-        assert!(
-            serialized["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("Missing or invalid uri parameter")
-        );
-    }
-
-    #[tokio::test]
-    async fn test_handle_resources_read_with_real_search() {
-        let client = http::BunDocsClient::new();
-        let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            id: json!("res6"),
-            method: "resources/read".to_string(),
-            params: Some(json!({"uri": "bun://docs?query=HTTP"})),
-        };
-
-        let response = handle_resources_read(&client, &request).await;
-        let serialized = serde_json::to_value(&response).unwrap();
-
-        // Real API should return valid results
-        assert!(serialized["result"]["contents"].is_array());
-        let contents = serialized["result"]["contents"].as_array().unwrap();
-        assert!(!contents.is_empty());
-    }
-
-    #[test]
-    fn test_init_logging_execution() {
-        // Test that init_logging can be called
-        // Will panic if called twice, but that's expected
-        let result = std::panic::catch_unwind(|| {
-            init_logging();
-        });
-
-        // Either succeeds or panics (already initialized) - both are fine
-        // This just ensures the function code path is exercised
-        let _ = result;
-    }
-
-    #[test]
-    fn test_print_version() {
-        // Test that print_version doesn't panic
-        // Can't easily test output without mocking stdout
-        let result = std::panic::catch_unwind(|| {
-            print_version();
-        });
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_print_help() {
-        // Test that print_help doesn't panic
-        let result = std::panic::catch_unwind(|| {
-            print_help();
-        });
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_handle_args_no_args() {
-        // Test with no args (simulate program name only)
-        let args = vec!["program".to_string()];
-        let result = handle_args(&args);
-        assert!(!result); // Should return false when no flags present
-    }
-
-    #[test]
-    fn test_handle_args_help_flag() {
-        // Test --help flag
-        let args = vec!["program".to_string(), "--help".to_string()];
-        let result = handle_args(&args);
-        assert!(result); // Should return true for help flag
-    }
-
-    #[test]
-    fn test_handle_args_help_short_flag() {
-        // Test -h flag
-        let args = vec!["program".to_string(), "-h".to_string()];
-        let result = handle_args(&args);
-        assert!(result); // Should return true for help flag
-    }
-
-    #[test]
-    fn test_handle_args_version_flag() {
-        // Test --version flag
-        let args = vec!["program".to_string(), "--version".to_string()];
-        let result = handle_args(&args);
-        assert!(result); // Should return true for version flag
-    }
-
-    #[test]
-    fn test_handle_args_version_short_flag() {
-        // Test -V flag
-        let args = vec!["program".to_string(), "-V".to_string()];
-        let result = handle_args(&args);
-        assert!(result); // Should return true for version flag
-    }
-
-    #[test]
-    fn test_get_string_param() {
-        let params = json!({"uri": "bun://docs", "other": 123});
-
-        assert_eq!(get_string_param(&params, "uri").unwrap(), "bun://docs");
-        assert!(get_string_param(&params, "other").is_err());
-        assert!(get_string_param(&params, "missing").is_err());
-    }
-
-    #[test]
-    fn test_parse_bun_docs_uri() {
-        assert_eq!(parse_bun_docs_uri("bun://docs").unwrap(), "");
-        assert_eq!(parse_bun_docs_uri("bun://docs?query=test").unwrap(), "test");
-        assert_eq!(
-            parse_bun_docs_uri("bun://docs?query=Bun.serve").unwrap(),
-            "Bun.serve"
-        );
-        assert!(parse_bun_docs_uri("invalid://uri").is_err());
-        assert!(parse_bun_docs_uri("").is_err());
-    }
-
-    #[test]
-    fn test_jsonrpc_error_code_constants() {
-        assert_eq!(JSONRPC_PARSE_ERROR, -32700);
-        assert_eq!(JSONRPC_INVALID_PARAMS, -32602);
-        assert_eq!(JSONRPC_INTERNAL_ERROR, -32603);
-        assert_eq!(JSONRPC_METHOD_NOT_FOUND, -32601);
-    }
-}
+mod main_tests;

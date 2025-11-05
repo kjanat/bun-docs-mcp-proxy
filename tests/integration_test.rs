@@ -1,3 +1,15 @@
+#![allow(clippy::expect_used, reason = "tests can use expect() for clarity")]
+#![allow(clippy::unwrap_used, reason = "tests can use unwrap() for brevity")]
+#![allow(clippy::indexing_slicing, reason = "tests use array indexing safely")]
+#![allow(
+    clippy::default_numeric_fallback,
+    reason = "test literals don't need type suffixes"
+)]
+#![allow(
+    clippy::tests_outside_test_module,
+    reason = "integration tests in tests/ directory"
+)]
+
 use serde_json::json;
 
 #[test]
@@ -5,30 +17,34 @@ fn test_protocol_types_roundtrip() {
     // Test that JSON-RPC types can be serialized and deserialized correctly
     let request_json = json!({
         "jsonrpc": "2.0",
-        "id": 1,
+        "id": 1_i32,
         "method": "tools/list",
         "params": {"query": "test"}
     });
 
-    let request_str = serde_json::to_string(&request_json).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&request_str).unwrap();
+    let request_str = serde_json::to_string(&request_json).expect("serialization succeeds in test");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&request_str).expect("deserialization succeeds in test");
 
-    assert_eq!(parsed["jsonrpc"], "2.0");
-    assert_eq!(parsed["method"], "tools/list");
+    assert_eq!(parsed.get("jsonrpc").expect("jsonrpc field exists"), "2.0");
+    assert_eq!(
+        parsed.get("method").expect("method field exists"),
+        "tools/list"
+    );
 }
 
 #[test]
 fn test_error_codes() {
     // Verify standard JSON-RPC error codes
     let error_codes = vec![
-        (-32700, "Parse error"),
-        (-32601, "Method not found"),
-        (-32603, "Internal error"),
+        (-32_700_i32, "Parse error"),
+        (-32_601_i32, "Method not found"),
+        (-32_603_i32, "Internal error"),
     ];
 
     for (code, _message) in error_codes {
-        assert!(code < 0, "Error codes should be negative");
-        assert!(code >= -32768, "Error codes should be in valid range");
+        assert!(code < 0_i32, "Error codes should be negative");
+        assert!(code >= -0x8000_i32, "Error codes should be in valid range");
     }
 }
 
@@ -72,16 +88,46 @@ fn test_tools_list_response_structure() {
         }]
     });
 
-    let tools = tools_response["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 1);
+    let tools = tools_response
+        .get("tools")
+        .expect("tools field exists")
+        .as_array()
+        .expect("tools is array");
+    assert_eq!(tools.len(), 1_usize);
 
-    let tool = &tools[0];
-    assert!(tool["name"].is_string());
-    assert!(tool["description"].is_string());
-    assert!(tool["inputSchema"].is_object());
-    assert_eq!(tool["inputSchema"]["type"], "object");
-    assert!(tool["inputSchema"]["properties"].is_object());
-    assert!(tool["inputSchema"]["required"].is_array());
+    let tool = tools.first().expect("tools array non-empty");
+    assert!(tool.get("name").expect("name field exists").is_string());
+    assert!(
+        tool.get("description")
+            .expect("description field exists")
+            .is_string()
+    );
+    assert!(
+        tool.get("inputSchema")
+            .expect("inputSchema field exists")
+            .is_object()
+    );
+    assert_eq!(
+        tool.get("inputSchema")
+            .expect("inputSchema exists")
+            .get("type")
+            .expect("type field exists"),
+        "object"
+    );
+    assert!(
+        tool.get("inputSchema")
+            .expect("inputSchema exists")
+            .get("properties")
+            .expect("properties field exists")
+            .is_object()
+    );
+    assert!(
+        tool.get("inputSchema")
+            .expect("inputSchema exists")
+            .get("required")
+            .expect("required field exists")
+            .is_array()
+    );
 }
 
 #[test]
@@ -96,20 +142,39 @@ fn test_unsupported_method_error_structure() {
     // Test that unsupported method errors follow JSON-RPC spec
     let error_response = json!({
         "jsonrpc": "2.0",
-        "id": 1,
+        "id": 1_i32,
         "error": {
-            "code": -32601,
+            "code": -32_601_i32,
             "message": "Method not found: unsupported_method"
         }
     });
 
-    assert_eq!(error_response["jsonrpc"], "2.0");
-    assert!(error_response["error"].is_object());
-    assert_eq!(error_response["error"]["code"], -32601);
+    assert_eq!(
+        error_response.get("jsonrpc").expect("jsonrpc field exists"),
+        "2.0"
+    );
     assert!(
-        error_response["error"]["message"]
+        error_response
+            .get("error")
+            .expect("error field exists")
+            .is_object()
+    );
+    assert_eq!(
+        error_response
+            .get("error")
+            .expect("error exists")
+            .get("code")
+            .expect("code field exists"),
+        -32_601_i32
+    );
+    assert!(
+        error_response
+            .get("error")
+            .expect("error exists")
+            .get("message")
+            .expect("message field exists")
             .as_str()
-            .unwrap()
+            .expect("message is string")
             .contains("Method not found")
     );
 }
@@ -121,18 +186,32 @@ fn test_parse_error_structure() {
         "jsonrpc": "2.0",
         "id": null,
         "error": {
-            "code": -32700,
+            "code": -32_700_i32,
             "message": "Parse error: invalid JSON"
         }
     });
 
-    assert_eq!(error_response["jsonrpc"], "2.0");
-    assert!(error_response["id"].is_null());
-    assert_eq!(error_response["error"]["code"], -32700);
+    assert_eq!(
+        error_response.get("jsonrpc").expect("jsonrpc field exists"),
+        "2.0"
+    );
+    assert!(error_response.get("id").expect("id field exists").is_null());
+    assert_eq!(
+        error_response
+            .get("error")
+            .expect("error exists")
+            .get("code")
+            .expect("code field exists"),
+        -32_700_i32
+    );
     assert!(
-        error_response["error"]["message"]
+        error_response
+            .get("error")
+            .expect("error exists")
+            .get("message")
+            .expect("message field exists")
             .as_str()
-            .unwrap()
+            .expect("message is string")
             .contains("Parse error")
     );
 }
@@ -142,19 +221,33 @@ fn test_internal_error_structure() {
     // Test that internal errors follow JSON-RPC spec
     let error_response = json!({
         "jsonrpc": "2.0",
-        "id": 1,
+        "id": 1_i32,
         "error": {
-            "code": -32603,
+            "code": -32_603_i32,
             "message": "Internal error: failed to process request"
         }
     });
 
-    assert_eq!(error_response["jsonrpc"], "2.0");
-    assert_eq!(error_response["error"]["code"], -32603);
+    assert_eq!(
+        error_response.get("jsonrpc").expect("jsonrpc field exists"),
+        "2.0"
+    );
+    assert_eq!(
+        error_response
+            .get("error")
+            .expect("error exists")
+            .get("code")
+            .expect("code field exists"),
+        -32_603_i32
+    );
     assert!(
-        error_response["error"]["message"]
+        error_response
+            .get("error")
+            .expect("error exists")
+            .get("message")
+            .expect("message field exists")
             .as_str()
-            .unwrap()
+            .expect("message is string")
             .contains("Internal error")
     );
 }
@@ -171,14 +264,26 @@ fn test_resources_list_response_structure() {
         }]
     });
 
-    let resources = resources_response["resources"].as_array().unwrap();
-    assert_eq!(resources.len(), 1);
+    let resources = resources_response
+        .get("resources")
+        .expect("resources field exists")
+        .as_array()
+        .expect("resources is array");
+    assert_eq!(resources.len(), 1_usize);
 
-    let resource = &resources[0];
-    assert_eq!(resource["uri"], "bun://docs");
-    assert!(resource["name"].is_string());
-    assert!(resource["description"].is_string());
-    assert_eq!(resource["mimeType"], "application/json");
+    let resource = resources.first().expect("resources array non-empty");
+    assert_eq!(resource.get("uri").expect("uri field exists"), "bun://docs");
+    assert!(resource.get("name").expect("name field exists").is_string());
+    assert!(
+        resource
+            .get("description")
+            .expect("description field exists")
+            .is_string()
+    );
+    assert_eq!(
+        resource.get("mimeType").expect("mimeType field exists"),
+        "application/json"
+    );
 }
 
 #[test]
@@ -192,13 +297,20 @@ fn test_resources_read_response_structure() {
         }]
     });
 
-    let contents = read_response["contents"].as_array().unwrap();
-    assert_eq!(contents.len(), 1);
+    let contents = read_response
+        .get("contents")
+        .expect("contents field exists")
+        .as_array()
+        .expect("contents is array");
+    assert_eq!(contents.len(), 1_usize);
 
-    let content = &contents[0];
-    assert!(content["uri"].is_string());
-    assert_eq!(content["mimeType"], "application/json");
-    assert!(content["text"].is_string());
+    let content = contents.first().expect("contents array non-empty");
+    assert!(content.get("uri").expect("uri field exists").is_string());
+    assert_eq!(
+        content.get("mimeType").expect("mimeType field exists"),
+        "application/json"
+    );
+    assert!(content.get("text").expect("text field exists").is_string());
 }
 
 #[test]
@@ -209,18 +321,21 @@ fn test_error_response_id_preservation() {
         "jsonrpc": "2.0",
         "id": request_id,
         "error": {
-            "code": -32601,
+            "code": -32_601_i32,
             "message": "Method not found"
         }
     });
 
-    assert_eq!(error_response["id"], "test-123");
+    assert_eq!(
+        error_response.get("id").expect("id field exists"),
+        "test-123"
+    );
 }
 
 #[test]
 fn test_numeric_and_string_ids() {
     // Test that both numeric and string IDs are valid
-    let numeric_id = json!(42);
+    let numeric_id = json!(42_i32);
     let string_id = json!("abc-123");
     let null_id = json!(null);
 
@@ -232,4 +347,24 @@ fn test_numeric_and_string_ids() {
     assert!(numeric_id.is_number() || numeric_id.is_string() || numeric_id.is_null());
     assert!(string_id.is_number() || string_id.is_string() || string_id.is_null());
     assert!(null_id.is_number() || null_id.is_string() || null_id.is_null());
+}
+
+#[test]
+fn test_main_loop_stdin_parse_error() {
+    use assert_cmd::cargo::cargo_bin_cmd;
+    use core::time::Duration;
+    use predicates::prelude::*;
+
+    // Test that malformed JSON triggers parse error with proper error response
+    let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
+    cmd.write_stdin("{ invalid json without closing\n")
+        .timeout(Duration::from_secs(2_u64))
+        .assert()
+        .stderr(
+            predicate::str::contains("parse")
+                .or(predicate::str::contains("Parse error"))
+                .or(predicate::str::contains("EOF")),
+        );
+    // Verifies error logging at src/main.rs line 449
+    // Verifies error response construction at lines 450-454
 }

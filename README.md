@@ -34,48 +34,35 @@ Reads JSON-RPC 2.0 messages from stdin, forwards to `bun.com/docs/mcp`, and writ
 
 ## Testing
 
+This project uses a **dual testing strategy**: fast unit tests by default, with opt-in integration tests for comprehensive validation. See [.github/TESTING.md](.github/TESTING.md) for detailed documentation.
+
 ### Quick Start
 
 ```bash
-# Run all tests
-make test
+# Run unit tests only (fast, no network)
+task test  # or: cargo test
 
-# Or use cargo directly
-cargo test
+# Run integration tests (requires network)
+task test-integration-only  # or: cargo test --features integration-tests
+
+# Run all tests including integration
+task test-with-integration  # or: cargo test --all-features
 ```
 
-### Test Categories
+### Test Strategy
 
-**Unit Tests** - Test individual components:
+- **Unit Tests** (Default): Fast, mocked tests that run in ~2-3 seconds without network calls
+- **Integration Tests** (Opt-in): Real API tests against `bun.com/docs/mcp`, run daily in CI or manually
 
-```bash
-make test-unit
-# Or: cargo test --lib --bins
-```
+### CI/CD
 
-**Integration Tests** - Test complete workflows:
-
-```bash
-make test-integration
-# Or: cargo test --test '*'
-```
-
-**Documentation Tests** - Test code examples in docs:
-
-```bash
-make test-doc
-# Or: cargo test --doc
-```
-
-**Shell Integration Tests** - Test the complete proxy:
-
-```bash
-./test-proxy.sh
-```
+- **Every commit**: Runs unit tests only (fast, reliable)
+- **Daily + Manual**: Integration tests via [scheduled workflow](.github/workflows/integration-tests.yml)
+- **Coverage**: Tracked separately for unit and integration tests
 
 ### Code Coverage
 
-**Current Coverage: 85.98%** (552/642 lines)
+**Current Coverage: ~86%** (with mocked unit tests)
 
 Generate HTML coverage report:
 

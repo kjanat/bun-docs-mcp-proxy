@@ -21,14 +21,19 @@
 //! are tightly coupled to real stdin/stdout types, making them difficult to unit test.
 //! They are tested through integration tests and manual testing with the actual binary.
 
-use anyhow::{Context, Result};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use anyhow::{Context as _, Result};
+use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tracing::debug;
 
-// Maximum length of messages to show in debug logs
-const DEBUG_MESSAGE_MAX_LEN: usize = 80;
+/// The maximum length of messages (in bytes) to display in debug logs.
+/// Messages longer than this will be truncated for readability.
+const DEBUG_MESSAGE_MAX_LEN: usize = 80_usize;
+
+/// Stdio-based transport for JSON-RPC communication
 pub struct StdioTransport {
+    /// A buffered reader for asynchronous input from `stdin`.
     stdin: BufReader<tokio::io::Stdin>,
+    /// An asynchronous writer for output to `stdout`.
     stdout: tokio::io::Stdout,
 }
 
@@ -39,6 +44,11 @@ impl Default for StdioTransport {
 }
 
 impl StdioTransport {
+    /// Create a new stdio transport
+    ///
+    /// # Returns
+    /// New `StdioTransport` instance connected to process stdin/stdout
+    #[must_use]
     pub fn new() -> Self {
         Self {
             stdin: BufReader::new(tokio::io::stdin()),
@@ -46,13 +56,22 @@ impl StdioTransport {
         }
     }
 
-    /// Truncate message for debug logging, preserving UTF-8 boundaries
+    /// Truncates a string to `DEBUG_MESSAGE_MAX_LEN` bytes, ensuring that the truncation
+    /// occurs on a UTF-8 character boundary to prevent invalid UTF-8 sequences.
+    ///
+    /// This is used for debug logging to keep log messages concise.
+    ///
+    /// # Arguments
+    /// * `message` - The string slice to truncate.
+    ///
+    /// # Returns
+    /// A string slice (`&str`) that is a valid UTF-8 truncation of the input `message`.
     fn truncate_for_debug(message: &str) -> &str {
         if message.len() <= DEBUG_MESSAGE_MAX_LEN {
             return message;
         }
         // Find the last char whose end position is at or before max length
-        let mut last_valid = 0;
+        let mut last_valid = 0_usize;
         for (idx, ch) in message.char_indices() {
             let end_pos = idx + ch.len_utf8();
             if end_pos > DEBUG_MESSAGE_MAX_LEN {
@@ -63,6 +82,16 @@ impl StdioTransport {
         &message[..last_valid]
     }
 
+    /// Read a message from stdin
+    ///
+    /// Reads one line from stdin. Empty lines are skipped.
+    ///
+    /// # Returns
+    /// - `Ok(Some(message))` - Successfully read a non-empty message
+    /// - `Ok(None)` - Empty line or EOF
+    ///
+    /// # Errors
+    /// Returns an error if reading from stdin fails
     pub async fn read_message(&mut self) -> Result<Option<String>> {
         let mut line = String::new();
         let bytes_read = self
@@ -71,7 +100,7 @@ impl StdioTransport {
             .await
             .context("Failed to read from stdin")?;
 
-        if bytes_read == 0 {
+        if bytes_read == 0_usize {
             debug!("EOF on stdin");
             return Ok(None);
         }
@@ -82,9 +111,18 @@ impl StdioTransport {
         }
 
         debug!("Read message: {}...", Self::truncate_for_debug(line));
-        Ok(Some(line.to_string()))
+        Ok(Some(line.to_owned()))
     }
 
+    /// Write a message to stdout
+    ///
+    /// Writes the message followed by a newline, then flushes stdout.
+    ///
+    /// # Arguments
+    /// * `message` - Message to write (newline will be added)
+    ///
+    /// # Errors
+    /// Returns an error if writing to or flushing stdout fails
     pub async fn write_message(&mut self, message: &str) -> Result<()> {
         debug!("Writing message: {}...", Self::truncate_for_debug(message));
 
@@ -108,36 +146,38 @@ impl StdioTransport {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, reason = "tests can use expect()")]
+#[allow(clippy::unwrap_used, reason = "tests can use unwrap()")]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_new_transport_creation() {
+    fn new_transport_creation() {
         let _transport = StdioTransport::new();
     }
 
     #[test]
-    fn test_default_transport_creation() {
+    fn default_transport_creation() {
         let _transport = StdioTransport::default();
     }
 
     #[test]
-    fn test_truncate_for_debug() {
+    fn truncate_for_debug() {
         let short = "short message";
         assert_eq!(StdioTransport::truncate_for_debug(short), short);
 
-        let long = "a".repeat(100);
+        let long = "a".repeat(100_usize);
         let truncated = StdioTransport::truncate_for_debug(&long);
         assert_eq!(truncated.len(), DEBUG_MESSAGE_MAX_LEN);
     }
 
     #[test]
-    fn test_debug_message_max_len_constant() {
-        assert_eq!(DEBUG_MESSAGE_MAX_LEN, 80);
+    fn debug_message_max_len_constant() {
+        assert_eq!(DEBUG_MESSAGE_MAX_LEN, 80_usize);
     }
 
     #[test]
-    fn test_read_message_logic() {
+    fn read_message_logic() {
         // Test line reading and trimming logic
         let line_with_newline = "test message\n";
         let trimmed = line_with_newline.trim();
@@ -146,39 +186,41 @@ mod tests {
     }
 
     #[test]
-    fn test_eof_detection() {
+    fn eof_detection() {
         // Zero bytes read simulates EOF
-        let bytes_read = 0;
-        assert_eq!(bytes_read, 0);
+        let bytes_read = 0_usize;
+        assert_eq!(bytes_read, 0_usize);
     }
 
     #[test]
-    fn test_write_message_format() {
+    fn write_message_format() {
         // Test message formatting logic
         let message = "test output";
-        let with_newline = format!("{}\n", message);
+        let with_newline = format!("{message}\n");
 
         assert_eq!(with_newline, "test output\n");
         assert!(with_newline.ends_with('\n'));
-        assert_eq!(with_newline.len(), message.len() + 1);
+        assert_eq!(with_newline.len(), message.len() + 1_usize);
     }
 
     #[test]
-    fn test_message_truncation_logic() {
-        let long_message = "a".repeat(100);
-        let truncated = &long_message[..long_message.len().min(80)];
-        assert_eq!(truncated.len(), 80);
+    fn message_truncation_logic() {
+        let long_message = "a".repeat(100_usize);
+        let truncated = long_message
+            .get(..long_message.len().min(80_usize))
+            .expect("valid slice within bounds");
+        assert_eq!(truncated.len(), 80_usize);
     }
 
     #[test]
-    fn test_trim_behavior() {
+    fn trim_behavior() {
         let message_with_whitespace = "  test message  \n";
         let trimmed = message_with_whitespace.trim();
         assert_eq!(trimmed, "test message");
     }
 
     #[test]
-    fn test_empty_line_detection() {
+    fn empty_line_detection() {
         let empty = "";
         let whitespace_only = "   \n";
         let non_empty = "message";
@@ -189,27 +231,27 @@ mod tests {
     }
 
     #[test]
-    fn test_newline_bytes() {
+    fn newline_bytes() {
         let newline = b"\n";
-        assert_eq!(newline.len(), 1);
-        assert_eq!(newline[0], 10);
+        assert_eq!(newline.len(), 1_usize);
+        assert_eq!(newline.first().expect("newline has one byte"), &10_u8);
     }
 
     #[test]
-    fn test_message_format() {
+    fn message_format() {
         let message = "test message";
-        let with_newline = format!("{}\n", message);
+        let with_newline = format!("{message}\n");
         assert_eq!(with_newline, "test message\n");
         assert!(with_newline.ends_with('\n'));
     }
 
     #[test]
-    fn test_string_length_safety() {
+    fn string_length_safety() {
         let short = "test";
-        let long = "a".repeat(200);
-        let short_min = short.len().min(80);
-        let long_min = long.len().min(80);
-        assert_eq!(short_min, 4);
-        assert_eq!(long_min, 80);
+        let long = "a".repeat(200_usize);
+        let short_min = short.len().min(80_usize);
+        let long_min = long.len().min(80_usize);
+        assert_eq!(short_min, 4_usize);
+        assert_eq!(long_min, 80_usize);
     }
 }
