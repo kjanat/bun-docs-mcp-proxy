@@ -294,7 +294,7 @@ async fn format_markdown(
                 Ok(mdx) => {
                     // Success: include URL comment and MDX content
                     let mut part = String::new();
-                    write!(part, "<!-- Source: {url} -->\n\n").unwrap();
+                    write!(part, "<!-- Source: {url} -->\n\n")?;
                     part.push_str(&mdx);
                     mdx_parts.push(part);
                 }
@@ -302,7 +302,7 @@ async fn format_markdown(
                     // Error: include error comment and fallback to original text
                     warn!("Failed to fetch MDX from {url}: {e}");
                     let mut part = String::new();
-                    write!(part, "<!-- Error: {e} -->\n\n").unwrap();
+                    write!(part, "<!-- Error: {e} -->\n\n")?;
                     part.push_str(entry.text);
                     mdx_parts.push(part);
                 }
