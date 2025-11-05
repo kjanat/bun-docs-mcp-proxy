@@ -696,12 +696,31 @@ fn test_get_string_param() {
 
 #[test]
 fn test_parse_bun_docs_uri() {
-    assert_eq!(parse_bun_docs_uri("bun://docs").unwrap(), "");
-    assert_eq!(parse_bun_docs_uri("bun://docs?query=test").unwrap(), "test");
+    // Test basic URI parsing
+    assert_eq!(
+        parse_bun_docs_uri("bun://docs").unwrap(),
+        (String::new(), None)
+    );
+    assert_eq!(
+        parse_bun_docs_uri("bun://docs?query=test").unwrap(),
+        ("test".to_owned(), None)
+    );
     assert_eq!(
         parse_bun_docs_uri("bun://docs?query=Bun.serve").unwrap(),
-        "Bun.serve"
+        ("Bun.serve".to_owned(), None)
     );
+
+    // Test with limit parameter
+    assert_eq!(
+        parse_bun_docs_uri("bun://docs?query=test&limit=5").unwrap(),
+        ("test".to_owned(), Some(5))
+    );
+    assert_eq!(
+        parse_bun_docs_uri("bun://docs?limit=10&query=search").unwrap(),
+        ("search".to_owned(), Some(10))
+    );
+
+    // Test invalid URIs
     parse_bun_docs_uri("invalid://uri").unwrap_err();
     parse_bun_docs_uri("").unwrap_err();
 }

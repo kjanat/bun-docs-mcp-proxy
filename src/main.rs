@@ -13,9 +13,24 @@
 //!
 //! - `initialize` - Initialize MCP connection, returns protocol version and capabilities
 //! - `tools/list` - List available tools (returns `SearchBun` tool)
-//! - `tools/call` - Execute a tool with parameters (forwarded to Bun Docs API)
-//! - `resources/list` - List available resources (returns Bun Documentation resource)
-//! - `resources/read` - Read a resource by URI (e.g., `bun://docs?query=Bun.serve`)
+//! - `tools/call` - Execute search via tool interface (for interactive AI agents like Zed)
+//! - `resources/list` - List resources with URI templates (for discovery)
+//! - `resources/read` - Read resource by URI (e.g., `bun://docs?query=Bun.serve&limit=5`)
+//!
+//! ## Dual Interface Design
+//!
+//! **Tools Interface** (`tools/*`):
+//! - Used by interactive AI agents (Zed's Agent Panel)
+//! - Requires user approval for invocations
+//! - Best for agentic workflows and dynamic queries
+//!
+//! **Resources Interface** (`resources/*`):
+//! - Used for read-only data access and documentation browsing
+//! - No approval required, faster access
+//! - Includes URI templates for discoverability
+//! - Supports query parameters: `query` (required), `limit` (optional, default 10)
+//!
+//! Both interfaces access the same underlying Bun Docs API for consistency.
 //!
 //! ## Architecture
 //!
@@ -122,27 +137,37 @@ fn get_string_param<'value>(
         .ok_or_else(|| format!("Missing or invalid {key} parameter"))
 }
 
-/// Parses a Bun documentation URI (e.g., `bun://docs?query=example`) and extracts the search query.
+/// Parses a Bun documentation URI and extracts query parameters.
 ///
-/// This function handles URIs for Bun documentation, specifically looking for the
-/// `bun://docs?query=` prefix to extract the query string. It also supports
-/// `bun://docs` for an empty query.
+/// Supports: `bun://docs`, `bun://docs?query=example`, `bun://docs?query=example&limit=5`
 ///
 /// # Arguments
 /// * `uri` - The URI string to parse.
 ///
 /// # Returns
-/// A `Result` which on success contains the extracted search query as a `String`.
-/// On failure, it returns a `String` describing the invalid URI format.
-#[allow(
-    clippy::option_if_let_else,
-    reason = "clearer with explicit if-let-else pattern"
-)]
-fn parse_bun_docs_uri(uri: &str) -> Result<String, String> {
-    if let Some(query_part) = uri.strip_prefix("bun://docs?query=") {
-        Ok(query_part.to_owned())
-    } else if uri == "bun://docs" {
-        Ok(String::new())
+/// A tuple of `(query: String, limit: Option<usize>)`.
+fn parse_bun_docs_uri(uri: &str) -> Result<(String, Option<usize>), String> {
+    if !uri.starts_with("bun://docs") {
+        return Err(format!("Invalid URI format: {uri}"));
+    }
+
+    if uri == "bun://docs" {
+        return Ok((String::new(), None));
+    }
+
+    if let Some(query_string) = uri.strip_prefix("bun://docs?") {
+        let mut query = String::new();
+        let mut limit: Option<usize> = None;
+
+        for param in query_string.split('&') {
+            if let Some(value) = param.strip_prefix("query=") {
+                query = value.to_owned();
+            } else if let Some(value) = param.strip_prefix("limit=") {
+                limit = value.parse::<usize>().ok();
+            }
+        }
+
+        Ok((query, limit))
     } else {
         Err(format!("Invalid URI format: {uri}"))
     }
@@ -604,12 +629,18 @@ fn handle_tools_list(request: &JsonRpcRequest) -> JsonRpcResponse {
 /// # Returns
 /// A `JsonRpcResponse` containing the list of resources.
 fn handle_resources_list(request: &JsonRpcRequest) -> JsonRpcResponse {
-    // Return available resources
+    // Return available resources with templates for discoverability
     let resources = serde_json::json!({
         "resources": [{
             "uri": "bun://docs",
             "name": "Bun Documentation",
             "description": "Search and browse Bun documentation",
+            "mimeType": "application/json"
+        }],
+        "resourceTemplates": [{
+            "uriTemplate": "bun://docs?query={query}&limit={limit}",
+            "name": "Search Bun Documentation",
+            "description": "Search Bun docs with query (required) and optional limit (default 10)",
             "mimeType": "application/json"
         }]
     });
@@ -650,13 +681,27 @@ async fn handle_resources_read(
         }
     };
 
-    // Parse URI to extract query
-    let query = match parse_bun_docs_uri(uri) {
-        Ok(q) => q,
+    // Parse URI to extract query and limit
+    let (query, limit) = match parse_bun_docs_uri(uri) {
+        Ok(params) => params,
         Err(msg) => {
             return JsonRpcResponse::error(request.id.clone(), JSONRPC_INVALID_PARAMS, msg);
         }
     };
+
+    // Handle empty query with helpful overview
+    let effective_query = if query.is_empty() {
+        info!("Empty query, returning Bun documentation overview");
+        "Bun.js getting started overview".to_owned()
+    } else {
+        query
+    };
+
+    // Build search request with optional limit
+    let mut arguments = serde_json::json!({"query": effective_query});
+    if let Some(limit_value) = limit {
+        arguments["limit"] = serde_json::json!(limit_value);
+    }
 
     // Forward to tools/call internally
     let search_request = serde_json::json!({
@@ -665,9 +710,7 @@ async fn handle_resources_read(
         "method": "tools/call",
         "params": {
             "name": "SearchBun",
-            "arguments": {
-                "query": query
-            }
+            "arguments": arguments
         }
     });
 
