@@ -63,9 +63,12 @@ fn cli_search_markdown_format() {
 /// Test file output creation
 #[test]
 fn cli_search_with_output_file() {
-    let temp_dir = tempdir().expect("tempdir creation succeeds");
-    let output_path = temp_dir.path().join("test_output.json");
-    let output_str = output_path.to_str().expect("path is valid UTF-8");
+    let temp_file = tempfile::Builder::new()
+        .prefix("cli_test_")
+        .suffix(".json")
+        .tempfile_in(".")
+        .expect("tempfile creation succeeds");
+    let output_str = temp_file.path().file_name().unwrap().to_str().unwrap();
 
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
     cmd.args(["--search", "test", "--output", output_str])
@@ -74,17 +77,20 @@ fn cli_search_with_output_file() {
         .stderr(predicate::str::contains("Output written to:"));
 
     // Verify file exists and contains content
-    assert!(output_path.exists());
-    let content = fs::read_to_string(&output_path).expect("file read succeeds");
+    assert!(Path::new(output_str).exists());
+    let content = fs::read_to_string(output_str).expect("file read succeeds");
     assert!(!content.is_empty());
 }
 
 /// Test markdown file output (fetches raw MDX)
 #[test]
 fn cli_search_markdown_to_file() {
-    let temp_dir = tempdir().expect("tempdir creation succeeds");
-    let output_path = temp_dir.path().join("docs.md");
-    let output_str = output_path.to_str().expect("path is valid UTF-8");
+    let temp_file = tempfile::Builder::new()
+        .prefix("cli_docs_")
+        .suffix(".md")
+        .tempfile_in(".")
+        .expect("tempfile creation succeeds");
+    let output_str = temp_file.path().file_name().unwrap().to_str().unwrap();
 
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
     cmd.args([
@@ -94,7 +100,7 @@ fn cli_search_markdown_to_file() {
     .success();
 
     // Verify markdown file contains MDX content or URL comments
-    let content = fs::read_to_string(&output_path).expect("file read succeeds");
+    let content = fs::read_to_string(output_str).expect("file read succeeds");
     assert!(
         content.contains("<!--") || content.contains("---") || content.contains("Bun"),
         "Markdown output should contain MDX content, URL comments, or separators"
@@ -104,12 +110,15 @@ fn cli_search_markdown_to_file() {
 /// Test overwrite warning
 #[test]
 fn cli_search_file_overwrite_warning() {
-    let temp_dir = tempdir().expect("tempdir creation succeeds");
-    let output_path = temp_dir.path().join("existing.json");
-    let output_str = output_path.to_str().expect("path is valid UTF-8");
+    let temp_file = tempfile::Builder::new()
+        .prefix("cli_existing_")
+        .suffix(".json")
+        .tempfile_in(".")
+        .expect("tempfile creation succeeds");
+    let output_str = temp_file.path().file_name().unwrap().to_str().unwrap();
 
     // Create existing file
-    fs::write(&output_path, "existing content").expect("file write succeeds");
+    fs::write(output_str, "existing content").expect("file write succeeds");
 
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
     cmd.args(["--search", "test", "--output", output_str])
@@ -117,7 +126,7 @@ fn cli_search_file_overwrite_warning() {
         .success();
 
     // Verify content was overwritten (no warning shown)
-    let content = fs::read_to_string(&output_path).expect("file read succeeds");
+    let content = fs::read_to_string(output_str).expect("file read succeeds");
     assert!(!content.contains("existing content"));
 }
 
@@ -135,30 +144,39 @@ fn cli_search_invalid_output_path() {
 #[test]
 fn cli_search_empty_query() {
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
-    cmd.args(["--search", ""]).assert().success(); // API handles empty queries
+    cmd.args(["--search", ""])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be empty"));
 }
 
 /// Test short flags
 #[test]
 fn cli_search_short_flags() {
-    let temp_dir = tempdir().expect("tempdir creation succeeds");
-    let output_path = temp_dir.path().join("short.json");
-    let output_str = output_path.to_str().expect("path is valid UTF-8");
+    let temp_file = tempfile::Builder::new()
+        .prefix("cli_short_")
+        .suffix(".json")
+        .tempfile_in(".")
+        .expect("tempfile creation succeeds");
+    let output_str = temp_file.path().file_name().unwrap().to_str().unwrap();
 
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
     cmd.args(["-s", "test", "-f", "json", "-o", output_str])
         .assert()
         .success();
 
-    assert!(output_path.exists());
+    assert!(Path::new(output_str).exists());
 }
 
 /// Test combined search with all options
 #[test]
 fn cli_search_all_options() {
-    let temp_dir = tempdir().expect("tempdir creation succeeds");
-    let output_path = temp_dir.path().join("full_test.md");
-    let output_str = output_path.to_str().expect("path is valid UTF-8");
+    let temp_file = tempfile::Builder::new()
+        .prefix("cli_full_")
+        .suffix(".md")
+        .tempfile_in(".")
+        .expect("tempfile creation succeeds");
+    let output_str = temp_file.path().file_name().unwrap().to_str().unwrap();
 
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
     cmd.env("RUST_LOG", "info")
@@ -175,7 +193,7 @@ fn cli_search_all_options() {
         .stderr(predicate::str::contains("Output written to:"));
 
     // Verify complete markdown file contains MDX content
-    let content = fs::read_to_string(&output_path).expect("file read succeeds");
+    let content = fs::read_to_string(output_str).expect("file read succeeds");
     assert!(
         !content.is_empty()
             && (content.contains("Bun") || content.contains("<!--") || content.contains("---")),
@@ -203,25 +221,20 @@ fn cli_search_special_characters() {
 
 /// Test output to relative path
 #[test]
-#[allow(
-    clippy::items_after_statements,
-    reason = "use statement localized to test"
-)]
 fn cli_search_relative_output_path() {
-    let temp_dir = tempdir().expect("tempdir creation succeeds");
-    use std::env::{current_dir, set_current_dir};
-    let old_dir = current_dir().expect("current_dir succeeds");
-    set_current_dir(&temp_dir).expect("set_current_dir succeeds");
+    let temp_file = tempfile::Builder::new()
+        .prefix("cli_relative_")
+        .suffix(".json")
+        .tempfile_in(".")
+        .expect("tempfile creation succeeds");
+    let output_str = temp_file.path().file_name().unwrap().to_str().unwrap();
 
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
-    cmd.args(["--search", "test", "--output", "./output.json"])
+    cmd.args(["--search", "test", "--output", output_str])
         .assert()
         .success();
 
-    assert!(Path::new("./output.json").exists());
-
-    // Cleanup
-    set_current_dir(old_dir).expect("set_current_dir succeeds");
+    assert!(Path::new(output_str).exists());
 }
 
 /// Test that MCP mode doesn't interfere with CLI
