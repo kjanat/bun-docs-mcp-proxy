@@ -12,6 +12,7 @@ env:
 jobs:
   test:
     name: Test
+    needs: lint
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -38,6 +39,7 @@ jobs:
 
   coverage:
     name: Code Coverage
+    needs: lint
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -107,6 +109,7 @@ jobs:
 
   build-matrix:
     name: Build ${{ matrix.platform.target }}
+    needs: test
     runs-on: ${{ matrix.platform.os }}
     permissions:
       contents: read
