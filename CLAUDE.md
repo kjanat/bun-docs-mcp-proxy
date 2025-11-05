@@ -40,6 +40,7 @@ task --list-all
 ```
 
 **CI Environment**: In CI/CD pipelines, use `--yes` flag to skip prompts:
+
 ```bash
 task --yes clean        # Auto-confirm in CI
 task --yes bump-major   # Skip breaking change prompt
@@ -234,7 +235,8 @@ require adjustment.
 
 **CLI search returns empty**: Verify network connectivity to `https://bun.com/docs/mcp`. Check RUST_LOG=debug output for errors.
 
-**Task prompts fail in CI**: Tasks with `prompt:` (clean, bump-major, bump-minor, build-all-*) require `--yes` flag in non-interactive environments:
+**Task prompts fail in CI**: Tasks with `prompt:` (clean, bump-major, bump-minor, build-all-\*) require `--yes` flag in non-interactive environments:
+
 ```bash
 # CI/CD usage
 task --yes clean
