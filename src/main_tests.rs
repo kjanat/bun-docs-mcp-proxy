@@ -760,8 +760,15 @@ async fn test_direct_search_with_output_file() {
 #[tokio::test]
 async fn test_direct_search_empty_query() {
     let result = direct_search("", &OutputFormat::Json, None).await;
-    // Should succeed, Bun API handles empty queries
-    result.unwrap();
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("cannot be empty"));
+}
+
+#[tokio::test]
+async fn test_direct_search_whitespace_only_query() {
+    let result = direct_search("   ", &OutputFormat::Json, None).await;
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("cannot be empty"));
 }
 
 #[tokio::test]

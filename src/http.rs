@@ -67,6 +67,9 @@ const BACKOFF_MAX_MS: u64 = 1000_u64;
 /// Maximum error response body size to read (100KB, prevents OOM from malicious/misconfigured servers)
 const MAX_ERROR_BODY_SIZE: usize = 100_000_usize;
 
+/// Maximum size for error body snippets in logs (2KB)
+const MAX_ERROR_SNIPPET_SIZE: usize = 2048;
+
 /// HTTP client for interacting with the Bun Docs API
 pub struct BunDocsClient {
     /// The underlying `reqwest::Client` used for making HTTP requests.
@@ -290,7 +293,7 @@ impl BunDocsClient {
                         &bytes
                     };
                     let body = String::from_utf8_lossy(limited_bytes);
-                    let body_snippet = Self::truncate_utf8(&body, 2048_usize);
+                    let body_snippet = Self::truncate_utf8(&body, MAX_ERROR_SNIPPET_SIZE);
                     let header_summary = Self::summarize_headers(&headers);
 
                     let error = anyhow::anyhow!(

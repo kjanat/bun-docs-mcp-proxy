@@ -362,6 +362,11 @@ async fn direct_search(
     format: &OutputFormat,
     output_path: Option<&str>,
 ) -> Result<()> {
+    // Validate query is not empty
+    if query.trim().is_empty() {
+        return Err(anyhow::anyhow!("Search query cannot be empty"));
+    }
+
     let client = http::BunDocsClient::new();
 
     // Validate output path if provided
@@ -406,8 +411,9 @@ async fn direct_search(
 
     // Write output
     if let Some(path) = output_path {
-        fs::write(path, formatted)?;
-        eprintln!("Output written to: {path}");
+        let bytes_written = formatted.len();
+        fs::write(path, &formatted)?;
+        eprintln!("Output written to: {path} ({bytes_written} bytes)");
     } else {
         println!("{formatted}");
     }
