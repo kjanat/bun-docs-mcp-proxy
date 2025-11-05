@@ -200,7 +200,7 @@ tasks:
     desc: Search using release binary
     aliases: [sr]
     deps: [build-release]
-    cmd: "{{.BUILD_DIR}}/{{.BINARY_NAME}} --search {{.CLI_ARGS}} | jq -r '.[]?[1]?.text'"
+    cmd: '{{.BUILD_DIR}}/{{.BINARY_NAME}} --search "{{.CLI_ARGS}}" | jq -r ''.[]?[1]?.text'''
 
   # ===== Manual MCP Protocol Tests =====
   test-mcp-init:
@@ -303,6 +303,9 @@ tasks:
       TARGET: x86_64-unknown-linux-gnu
       NAME: linux-x86_64
     deps: [build-linux-gnu]
+    preconditions:
+      - sh: command -v tar
+        msg: "tar is required to create packages"
     dir: target/{{.TARGET}}/release
     cmd: tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
 
@@ -312,6 +315,9 @@ tasks:
       TARGET: aarch64-unknown-linux-gnu
       NAME: linux-aarch64
     deps: [build-linux-arm64]
+    preconditions:
+      - sh: command -v tar
+        msg: "tar is required to create packages"
     dir: target/{{.TARGET}}/release
     cmd: tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
 
@@ -321,6 +327,9 @@ tasks:
       TARGET: x86_64-unknown-linux-musl
       NAME: linux-x86_64-musl
     deps: [build-linux-musl]
+    preconditions:
+      - sh: command -v tar
+        msg: "tar is required to create packages"
     dir: target/{{.TARGET}}/release
     cmd: tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
 
@@ -330,8 +339,11 @@ tasks:
       TARGET: aarch64-unknown-linux-musl
       NAME: linux-aarch64-musl
     deps: [build-linux-arm64-musl]
+    preconditions:
+      - sh: command -v tar
+        msg: "tar is required to create packages"
     dir: target/{{.TARGET}}/release
-    cmd: cd target/{{.TARGET}}/release && tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
+    cmd: tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
 
   package-macos-intel:
     desc: Package macOS Intel binary as tar.gz
@@ -340,6 +352,9 @@ tasks:
       TARGET: x86_64-apple-darwin
       NAME: macos-x86_64
     deps: [build-macos-intel]
+    preconditions:
+      - sh: command -v tar
+        msg: "tar is required to create packages"
     dir: target/{{.TARGET}}/release
     cmd: tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
 
@@ -350,6 +365,9 @@ tasks:
       TARGET: aarch64-apple-darwin
       NAME: macos-aarch64
     deps: [build-macos-arm]
+    preconditions:
+      - sh: command -v tar
+        msg: "tar is required to create packages"
     dir: target/{{.TARGET}}/release
     cmd: tar czf {{.BINARY_NAME}}-{{.NAME}}.tar.gz {{.BINARY_NAME}}
 
@@ -360,6 +378,9 @@ tasks:
       TARGET: x86_64-pc-windows-msvc
       NAME: windows-x86_64
     deps: [build-windows]
+    preconditions:
+      - sh: command -v 7z
+        msg: "7z is required to create zip packages"
     dir: target/{{.TARGET}}/release
     cmd: 7z a {{.BINARY_NAME}}-{{.NAME}}.zip {{.BINARY_NAME}}.exe
 
@@ -370,6 +391,9 @@ tasks:
       TARGET: aarch64-pc-windows-msvc
       NAME: windows-aarch64
     deps: [build-windows-arm]
+    preconditions:
+      - sh: command -v 7z
+        msg: "7z is required to create zip packages"
     dir: target/{{.TARGET}}/release
     cmd: 7z a {{.BINARY_NAME}}-{{.NAME}}.zip {{.BINARY_NAME}}.exe
 
@@ -405,6 +429,7 @@ tasks:
     watch: true
     sources:
       - src/**/*.rs
+      - tests/**/*.rs
       - Cargo.toml
       - Cargo.lock
     cmds:
