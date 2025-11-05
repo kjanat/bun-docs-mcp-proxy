@@ -1,3 +1,8 @@
+#![allow(clippy::expect_used, reason = "tests can use expect()")]
+#![allow(clippy::unwrap_used, reason = "tests can use unwrap()")]
+#![allow(clippy::indexing_slicing, reason = "tests use array indexing")]
+#![allow(clippy::default_numeric_fallback, reason = "test literals")]
+
 use super::*;
 use serde_json::json;
 
@@ -69,18 +74,18 @@ fn test_parse_invalid_jsonrpc_request() {
 fn test_error_response_codes() {
     // Test parse error
     let parse_error = JsonRpcResponse::error(json!(1), -32700, "Parse error".to_owned());
-    let serialized = serde_json::to_value(&parse_error).unwrap();
-    assert_eq!(serialized["error"]["code"], -32700);
+    let serialized_parse = serde_json::to_value(&parse_error).unwrap();
+    assert_eq!(serialized_parse["error"]["code"], -32700);
 
     // Test method not found
     let method_error = JsonRpcResponse::error(json!(2), -32601, "Method not found".to_owned());
-    let serialized = serde_json::to_value(&method_error).unwrap();
-    assert_eq!(serialized["error"]["code"], -32601);
+    let serialized_method = serde_json::to_value(&method_error).unwrap();
+    assert_eq!(serialized_method["error"]["code"], -32601);
 
     // Test internal error
     let internal_error = JsonRpcResponse::error(json!(3), -32603, "Internal error".to_owned());
-    let serialized = serde_json::to_value(&internal_error).unwrap();
-    assert_eq!(serialized["error"]["code"], -32603);
+    let serialized_internal = serde_json::to_value(&internal_error).unwrap();
+    assert_eq!(serialized_internal["error"]["code"], -32603);
 }
 
 #[test]

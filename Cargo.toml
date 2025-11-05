@@ -37,12 +37,39 @@ predicates = "3"
 tempfile = "3"
 
 [lints.clippy]
+# Individual restriction lints (blanket restriction group is forbidden by clippy)
+# Note: Using "allow" for overly pedantic lints that fight idiomatic Rust
+absolute_paths = "allow"  # Too noisy, blocks std::path::Path etc
+allow_attributes_without_reason = "warn"
+arithmetic_side_effects = "allow"  # Too pedantic for idx + 1
+as_conversions = "allow"  # Sometimes necessary
 cargo = { level = "warn", priority = -1 }
+decimal_literal_representation = "allow"
+default_numeric_fallback = "allow"  # json!(1) is fine
+expect_used = "allow"  # Better than unwrap with message
+implicit_return = "allow"  # Idiomatic Rust uses implicit returns
+indexing_slicing = "allow"  # Common pattern, tests especially
+let_underscore_must_use = "allow"
+let_underscore_untyped = "allow"
+min_ident_chars = "allow"  # |e| is fine in closures
+missing_docs_in_private_items = "allow"  # Too verbose for private items
+mod_module_files = "warn"  # Keep this - prefer single-file modules
 # Allow multiple versions for dev-dependencies (mockito/tempfile use newer getrandom than ring)
 multiple_crate_versions = "allow"
 nursery = { level = "warn", priority = -1 }
+pattern_type_mismatch = "allow"
 pedantic = { level = "warn", priority = -1 }
-restriction = { level = "warn", priority = -1 }
+print_stderr = "allow"  # CLI tool needs output
+print_stdout = "allow"  # CLI tool needs output
+question_mark_used = "allow"  # Idiomatic error handling
+shadow_reuse = "allow"  # let line = line.trim() is fine
+shadow_unrelated = "warn"  # But warn on unrelated shadowing
+single_call_fn = "allow"  # Helper functions improve readability
+single_char_lifetime_names = "warn"
+string_slice = "allow"  # Common pattern when UTF-8 safe
+tests_outside_test_module = "allow"  # Tests in tests/ are fine
+unseparated_literal_suffix = "warn"
+unwrap_used = "allow"  # Tests can unwrap
 
 [profile.release]
 opt-level = "z"  # Optimize for size

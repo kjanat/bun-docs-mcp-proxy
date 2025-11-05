@@ -1,3 +1,11 @@
+#![allow(clippy::expect_used, reason = "tests can use expect() for clarity")]
+#![allow(clippy::unwrap_used, reason = "tests can use unwrap() for brevity")]
+#![allow(clippy::indexing_slicing, reason = "tests use array indexing safely")]
+#![allow(
+    clippy::tests_outside_test_module,
+    reason = "integration tests in tests/ directory"
+)]
+
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::fs;
@@ -32,7 +40,7 @@ fn cli_search_text_format() {
         .assert()
         .success();
     // Text format should not contain JSON brackets
-    let output = cmd.output().unwrap();
+    let output = cmd.output().expect("command executed successfully");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.contains("\"content\"") || stdout.contains("Bun"));
 }
@@ -55,9 +63,9 @@ fn cli_search_markdown_format() {
 /// Test file output creation
 #[test]
 fn cli_search_with_output_file() {
-    let temp_dir = tempdir().unwrap();
+    let temp_dir = tempdir().expect("tempdir creation succeeds");
     let output_path = temp_dir.path().join("test_output.json");
-    let output_str = output_path.to_str().unwrap();
+    let output_str = output_path.to_str().expect("path is valid UTF-8");
 
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
     cmd.args(["--search", "test", "--output", output_str])
@@ -67,16 +75,16 @@ fn cli_search_with_output_file() {
 
     // Verify file exists and contains content
     assert!(output_path.exists());
-    let content = fs::read_to_string(&output_path).unwrap();
+    let content = fs::read_to_string(&output_path).expect("file read succeeds");
     assert!(!content.is_empty());
 }
 
 /// Test markdown file output (fetches raw MDX)
 #[test]
 fn cli_search_markdown_to_file() {
-    let temp_dir = tempdir().unwrap();
+    let temp_dir = tempdir().expect("tempdir creation succeeds");
     let output_path = temp_dir.path().join("docs.md");
-    let output_str = output_path.to_str().unwrap();
+    let output_str = output_path.to_str().expect("path is valid UTF-8");
 
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
     cmd.args([
@@ -86,7 +94,7 @@ fn cli_search_markdown_to_file() {
     .success();
 
     // Verify markdown file contains MDX content or URL comments
-    let content = fs::read_to_string(&output_path).unwrap();
+    let content = fs::read_to_string(&output_path).expect("file read succeeds");
     assert!(
         content.contains("<!--") || content.contains("---") || content.contains("Bun"),
         "Markdown output should contain MDX content, URL comments, or separators"
@@ -96,12 +104,12 @@ fn cli_search_markdown_to_file() {
 /// Test overwrite warning
 #[test]
 fn cli_search_file_overwrite_warning() {
-    let temp_dir = tempdir().unwrap();
+    let temp_dir = tempdir().expect("tempdir creation succeeds");
     let output_path = temp_dir.path().join("existing.json");
-    let output_str = output_path.to_str().unwrap();
+    let output_str = output_path.to_str().expect("path is valid UTF-8");
 
     // Create existing file
-    fs::write(&output_path, "existing content").unwrap();
+    fs::write(&output_path, "existing content").expect("file write succeeds");
 
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
     cmd.args(["--search", "test", "--output", output_str])
@@ -110,7 +118,7 @@ fn cli_search_file_overwrite_warning() {
         .stderr(predicate::str::contains("Warning").and(predicate::str::contains("overwritten")));
 
     // Verify content was overwritten
-    let content = fs::read_to_string(&output_path).unwrap();
+    let content = fs::read_to_string(&output_path).expect("file read succeeds");
     assert!(!content.contains("existing content"));
 }
 
@@ -134,9 +142,9 @@ fn cli_search_empty_query() {
 /// Test short flags
 #[test]
 fn cli_search_short_flags() {
-    let temp_dir = tempdir().unwrap();
+    let temp_dir = tempdir().expect("tempdir creation succeeds");
     let output_path = temp_dir.path().join("short.json");
-    let output_str = output_path.to_str().unwrap();
+    let output_str = output_path.to_str().expect("path is valid UTF-8");
 
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
     cmd.args(["-s", "test", "-f", "json", "-o", output_str])
@@ -149,9 +157,9 @@ fn cli_search_short_flags() {
 /// Test combined search with all options
 #[test]
 fn cli_search_all_options() {
-    let temp_dir = tempdir().unwrap();
+    let temp_dir = tempdir().expect("tempdir creation succeeds");
     let output_path = temp_dir.path().join("full_test.md");
-    let output_str = output_path.to_str().unwrap();
+    let output_str = output_path.to_str().expect("path is valid UTF-8");
 
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
     cmd.env("RUST_LOG", "info")
@@ -168,7 +176,7 @@ fn cli_search_all_options() {
         .stderr(predicate::str::contains("Output written to:"));
 
     // Verify complete markdown file contains MDX content
-    let content = fs::read_to_string(&output_path).unwrap();
+    let content = fs::read_to_string(&output_path).expect("file read succeeds");
     assert!(
         !content.is_empty()
             && (content.contains("Bun") || content.contains("<!--") || content.contains("---")),
@@ -196,10 +204,15 @@ fn cli_search_special_characters() {
 
 /// Test output to relative path
 #[test]
+#[allow(
+    clippy::items_after_statements,
+    reason = "use statement localized to test"
+)]
 fn cli_search_relative_output_path() {
-    let temp_dir = tempdir().unwrap();
-    let old_dir = std::env::current_dir().unwrap();
-    std::env::set_current_dir(&temp_dir).unwrap();
+    let temp_dir = tempdir().expect("tempdir creation succeeds");
+    use std::env::{current_dir, set_current_dir};
+    let old_dir = current_dir().expect("current_dir succeeds");
+    set_current_dir(&temp_dir).expect("set_current_dir succeeds");
 
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
     cmd.args(["--search", "test", "--output", "./output.json"])
@@ -209,7 +222,7 @@ fn cli_search_relative_output_path() {
     assert!(Path::new("./output.json").exists());
 
     // Cleanup
-    std::env::set_current_dir(old_dir).unwrap();
+    set_current_dir(old_dir).expect("set_current_dir succeeds");
 }
 
 /// Test that MCP mode doesn't interfere with CLI

@@ -1,11 +1,25 @@
+#![allow(clippy::expect_used, reason = "tests can use expect() for clarity")]
+#![allow(clippy::unwrap_used, reason = "tests can use unwrap() for brevity")]
+#![allow(clippy::indexing_slicing, reason = "tests use array indexing safely")]
+#![allow(
+    clippy::default_numeric_fallback,
+    reason = "test literals don't need type suffixes"
+)]
+#![allow(clippy::print_stderr, reason = "tests may print debug output")]
+#![allow(
+    clippy::tests_outside_test_module,
+    reason = "integration tests in tests/ directory"
+)]
+
 // Additional HTTP module tests for network errors and edge cases
 // Tests real error scenarios without mocking
+use core::time::Duration;
 use serde_json::json;
-use std::{io::Error, io::ErrorKind::Other};
+use std::io::{Error, ErrorKind::Other};
 
 // Re-export needed types for testing
 mod http_test_utils {
-    use anyhow::Result;
+    use anyhow::{Context as _, Result};
     use reqwest::Client;
     use serde_json::Value;
 
@@ -16,15 +30,13 @@ mod http_test_utils {
 
     impl BunDocsClient {
         pub fn new_with_url(url: String) -> Self {
-            return Self {
+            Self {
                 client: Client::new(),
                 base_url: url,
-            };
+            }
         }
 
         pub async fn forward_request(&self, request: Value) -> Result<Value> {
-            use anyhow::Context as _;
-
             const REQUEST_TIMEOUT_SECS: u64 = 5;
 
             let response = self
@@ -51,17 +63,17 @@ mod http_test_utils {
             let content_type = response
                 .headers()
                 .get("content-type")
-                .and_then(|v| return v.to_str().ok())
+                .and_then(|header_value| header_value.to_str().ok())
                 .unwrap_or("");
 
             if content_type.contains("text/event-stream") {
-                return self.parse_sse_response(response).await;
+                self.parse_sse_response(response).await
+            } else {
+                response
+                    .json()
+                    .await
+                    .context("Failed to parse JSON response")
             }
-
-            return response
-                .json()
-                .await
-                .context("Failed to parse JSON response");
         }
 
         async fn parse_sse_response(&self, response: reqwest::Response) -> Result<Value> {
@@ -77,14 +89,14 @@ mod http_test_utils {
                             return Ok(json_response);
                         }
                     }
-                    Err(e) => {
-                        tracing::warn!("SSE stream error: {}", e);
+                    Err(err) => {
+                        tracing::warn!("SSE stream error: {}", err);
                         break;
                     }
                 }
             }
 
-            return Err(anyhow::anyhow!("No valid JSON-RPC response in SSE stream"));
+            Err(anyhow::anyhow!("No valid JSON-RPC response in SSE stream"))
         }
 
         fn parse_sse_event_data(data: &str) -> Result<Option<Value>> {
@@ -93,12 +105,12 @@ mod http_test_utils {
             }
 
             let parsed = serde_json::from_str::<Value>(data)
-                .map_err(|e| anyhow::anyhow!("Failed to parse SSE event data as JSON: {e}"))?;
+                .map_err(|err| anyhow::anyhow!("Failed to parse SSE event data as JSON: {err}"))?;
 
             if parsed.get("result").is_some() || parsed.get("error").is_some() {
-                return Ok(Some(parsed));
+                Ok(Some(parsed))
             } else {
-                return Ok(None);
+                Ok(None)
             }
         }
     }
@@ -113,7 +125,7 @@ async fn test_forward_request_connection_refused() {
 
     let request = json!({
         "jsonrpc": "2.0",
-        "id": 1,
+        "id": 1_i32,
         "method": "tools/list"
     });
 
@@ -136,7 +148,7 @@ async fn test_forward_request_invalid_hostname() {
 
     let request = json!({
         "jsonrpc": "2.0",
-        "id": 1,
+        "id": 1_i32,
         "method": "tools/list"
     });
 
@@ -157,14 +169,17 @@ async fn test_forward_request_timeout_with_real_slow_endpoint() {
 
     let request = json!({
         "jsonrpc": "2.0",
-        "id": 1,
+        "id": 1_i32,
         "method": "tools/list"
     });
 
     let result = client.forward_request(request).await;
     assert!(result.is_err());
     let error_msg = result.unwrap_err().to_string();
-    eprintln!("Timeout error: {error_msg}");
+    #[allow(clippy::print_stderr, reason = "debug output for timeout test")]
+    {
+        eprintln!("Timeout error: {error_msg}");
+    }
     // Timeout manifests as "Failed to send request" error
     assert!(error_msg.contains("Failed to send") || error_msg.contains("Bun Docs API error"));
 }
@@ -176,7 +191,7 @@ async fn test_forward_request_http_404() {
 
     let request = json!({
         "jsonrpc": "2.0",
-        "id": 1,
+        "id": 1_i32,
         "method": "tools/list"
     });
 
@@ -193,7 +208,7 @@ async fn test_forward_request_http_500() {
 
     let request = json!({
         "jsonrpc": "2.0",
-        "id": 1,
+        "id": 1_i32,
         "method": "tools/list"
     });
 
@@ -210,7 +225,7 @@ async fn test_parse_invalid_json_response() {
 
     let request = json!({
         "jsonrpc": "2.0",
-        "id": 1,
+        "id": 1_i32,
         "method": "tools/list"
     });
 
@@ -218,7 +233,10 @@ async fn test_parse_invalid_json_response() {
     // httpbingo/html returns HTTP 405 for POST, which tests HTTP error handling
     assert!(result.is_err());
     let error_msg = result.unwrap_err().to_string();
-    eprintln!("HTML error: {error_msg}");
+    #[allow(clippy::print_stderr, reason = "debug output for HTML error test")]
+    {
+        eprintln!("HTML error: {error_msg}");
+    }
     assert!(
         error_msg.contains("405")
             || error_msg.contains("Method Not Allowed")
@@ -235,24 +253,34 @@ fn test_sse_parsing_logic() {
     let invalid_json = "not valid json";
 
     // Valid result
-    let parsed: serde_json::Result<serde_json::Value> = serde_json::from_str(valid_result);
-    assert!(parsed.is_ok());
-    assert!(parsed.unwrap().get("result").is_some());
+    let parsed_result: serde_json::Result<serde_json::Value> = serde_json::from_str(valid_result);
+    assert!(parsed_result.is_ok());
+    assert!(
+        parsed_result
+            .expect("parsed successfully")
+            .get("result")
+            .is_some()
+    );
 
     // Valid error
-    let parsed: serde_json::Result<serde_json::Value> = serde_json::from_str(valid_error);
-    assert!(parsed.is_ok());
-    assert!(parsed.unwrap().get("error").is_some());
+    let parsed_error: serde_json::Result<serde_json::Value> = serde_json::from_str(valid_error);
+    assert!(parsed_error.is_ok());
+    assert!(
+        parsed_error
+            .expect("parsed successfully")
+            .get("error")
+            .is_some()
+    );
 
     // Neither result nor error (should be skipped in SSE parsing)
-    let parsed: serde_json::Result<serde_json::Value> = serde_json::from_str(neither);
-    assert!(parsed.is_ok());
-    let val = parsed.unwrap();
-    assert!(val.get("result").is_none() && val.get("error").is_none());
+    let parsed_neither: serde_json::Result<serde_json::Value> = serde_json::from_str(neither);
+    assert!(parsed_neither.is_ok());
+    let value = parsed_neither.expect("parsed successfully");
+    assert!(value.get("result").is_none() && value.get("error").is_none());
 
     // Invalid JSON
-    let parsed: serde_json::Result<serde_json::Value> = serde_json::from_str(invalid_json);
-    parsed.unwrap_err();
+    let parsed_invalid: serde_json::Result<serde_json::Value> = serde_json::from_str(invalid_json);
+    let _err = parsed_invalid.unwrap_err();
 }
 
 #[test]
@@ -290,26 +318,24 @@ fn test_content_type_header_parsing() {
         "application/json;charset=UTF-8",
     ];
 
-    for ct in sse_types {
-        assert!(ct.contains("text/event-stream"));
+    for content_type in sse_types {
+        assert!(content_type.contains("text/event-stream"));
     }
 
-    for ct in json_types {
-        assert!(!ct.contains("text/event-stream"));
-        assert!(ct.contains("application/json"));
+    for content_type in json_types {
+        assert!(!content_type.contains("text/event-stream"));
+        assert!(content_type.contains("application/json"));
     }
 }
 
 #[test]
 fn test_timeout_duration() {
-    use core::time::Duration;
-
     const REQUEST_TIMEOUT_SECS: u64 = 5;
     let timeout = Duration::from_secs(REQUEST_TIMEOUT_SECS);
 
-    assert_eq!(timeout.as_secs(), 5);
-    assert!(timeout.as_secs() > 0);
-    assert!(timeout.as_secs() < 10);
+    assert_eq!(timeout.as_secs(), 5_u64);
+    assert!(timeout.as_secs() > 0_u64);
+    assert!(timeout.as_secs() < 10_u64);
 }
 
 #[test]

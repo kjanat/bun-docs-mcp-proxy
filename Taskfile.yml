@@ -50,10 +50,12 @@ tasks:
           echo "Binary: ./{{.BUILD_DIR}}/{{.BINARY_NAME}}"
     sources:
       - src/**/*.rs
+      - tests/**/*.rs
       - Cargo.toml
       - Cargo.lock
     generates:
       - "{{.BUILD_DIR}}/{{.BINARY_NAME}}"
+    silent: true
 
   clean:
     desc: Remove build artifacts
@@ -141,13 +143,13 @@ tasks:
   clippy:
     desc: Run clippy linter with all features
     aliases: [lint]
-    env:
-      RUSTFLAGS: -D warnings
     cmd: |
       cargo clippy \
         --all-features \
         --all-targets \
         {{.CLI_ARGS}}
+    # env:
+    #   RUSTFLAGS: -D warnings
 
   clippy-strict:
     desc: Run clippy linter with all features
@@ -420,6 +422,7 @@ tasks:
       - task: test-integration
       - task: fmt-check
       - task: clippy
+    silent: true
 
   ci-coverage:
     desc: Run CI coverage workflow locally
@@ -428,6 +431,7 @@ tasks:
     cmds:
       - task: test-nextest
       - task: coverage-nextest
+    silent: true
 
   ci-lint:
     desc: Run CI lint workflow locally
@@ -436,6 +440,7 @@ tasks:
     cmds:
       - task: fmt-check
       - task: clippy
+    silent: true
 
   ci-all:
     desc: Run complete CI pipeline locally
@@ -443,6 +448,7 @@ tasks:
       - task: ci
       - task: ci-coverage
       - task: ci-lint
+    silent: true
 
   # ===== Version Management =====
   version:

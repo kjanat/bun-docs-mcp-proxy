@@ -36,10 +36,13 @@ use std::fs;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
-// JSON-RPC error codes
+/// Standard JSON-RPC 2.0 error code for parse errors (invalid JSON).
 const JSONRPC_PARSE_ERROR: i32 = -32700;
+/// Standard JSON-RPC 2.0 error code for invalid parameters.
 const JSONRPC_INVALID_PARAMS: i32 = -32602;
+/// Standard JSON-RPC 2.0 error code for internal errors.
 const JSONRPC_INTERNAL_ERROR: i32 = -32603;
+/// Standard JSON-RPC 2.0 error code for method not found errors.
 const JSONRPC_METHOD_NOT_FOUND: i32 = -32601;
 
 /// Output format for CLI search results
@@ -95,18 +98,49 @@ struct Cli {
     format: OutputFormat,
 }
 
-/// Extract a required string parameter from JSON-RPC params
-fn get_string_param<'a>(params: &'a serde_json::Value, key: &str) -> Result<&'a str, String> {
+/// Extracts a required string parameter from a `serde_json::Value` representing JSON-RPC parameters.
+///
+/// This helper function safely retrieves a string value associated with a given key
+/// from a JSON object. It returns an error if the key is missing, or if the value
+/// is not a string.
+///
+/// # Arguments
+/// * `params` - A reference to the `serde_json::Value` (expected to be an object)
+///   containing the parameters.
+/// * `key` - The name of the string parameter to extract.
+///
+/// # Returns
+/// A `Result` which on success contains a string slice (`&str`) of the parameter's value.
+/// On failure, it returns a `String` describing the error.
+fn get_string_param<'value>(
+    params: &'value serde_json::Value,
+    key: &str,
+) -> Result<&'value str, String> {
     params
         .get(key)
         .and_then(|v| v.as_str())
         .ok_or_else(|| format!("Missing or invalid {key} parameter"))
 }
 
-/// Parse a Bun docs URI and extract the search query
+/// Parses a Bun documentation URI (e.g., `bun://docs?query=example`) and extracts the search query.
+///
+/// This function handles URIs for Bun documentation, specifically looking for the
+/// `bun://docs?query=` prefix to extract the query string. It also supports
+/// `bun://docs` for an empty query.
+///
+/// # Arguments
+/// * `uri` - The URI string to parse.
+///
+/// # Returns
+/// A `Result` which on success contains the extracted search query as a `String`.
+/// On failure, it returns a `String` describing the invalid URI format.
+#[allow(
+    clippy::option_if_let_else,
+    reason = "clearer with explicit if-let-else pattern"
+)]
 fn parse_bun_docs_uri(uri: &str) -> Result<String, String> {
     if let Some(query_part) = uri.strip_prefix("bun://docs?query=") {
-        return Ok(query_part.to_owned());
+        Ok(query_part.to_owned())
     } else if uri == "bun://docs" {
         Ok(String::new())
     } else {
@@ -114,6 +148,10 @@ fn parse_bun_docs_uri(uri: &str) -> Result<String, String> {
     }
 }
 
+/// Initializes the `tracing` subscriber for logging.
+///
+/// This function sets up `tracing_subscriber` to filter logs based on the `RUST_LOG`
+/// environment variable (defaulting to `info` if not set) and directs output to `stderr`.
 fn init_logging() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -124,7 +162,17 @@ fn init_logging() {
         .init();
 }
 
-/// Extract text content from a search result
+/// Extracts all text content from a search result's `content` array.
+///
+/// The search result is expected to be a JSON object with a `content` field,
+/// which is an array of objects, each with a `text` field.
+///
+/// # Arguments
+/// * `result` - A reference to the `serde_json::Value` representing the search result.
+///
+/// # Returns
+/// A `Vec<&str>` containing all the extracted text slices. Returns an empty vector
+/// if `content` is missing or not an array.
 fn extract_content_texts(result: &serde_json::Value) -> Vec<&str> {
     result
         .get("content")
@@ -138,16 +186,26 @@ fn extract_content_texts(result: &serde_json::Value) -> Vec<&str> {
         .unwrap_or_default()
 }
 
-/// Represents a documentation entry with URL and fallback text
-struct DocEntry<'a> {
+/// Represents a single documentation entry, which may have a URL for fetching the
+/// full content and always has fallback text from the initial search result.
+struct DocEntry<'text> {
+    /// An optional URL to the full documentation page.
     url: Option<String>,
-    text: &'a str,
+    /// The fallback text content, extracted from the search result.
+    text: &'text str,
 }
 
-/// Extract URLs and text from content for markdown fetching
+/// Parses search result content to create a vector of `DocEntry` structs.
 ///
-/// Parses "Link: URL" patterns from content[].text fields and returns
-/// structured entries with both the URL (if found) and the full text as fallback.
+/// This function iterates through the text content of a search result, looking for
+/// `Link:` annotations to extract URLs. It creates a `DocEntry` for each piece of
+/// content, containing the URL (if found) and the original text as a fallback.
+///
+/// # Arguments
+/// * `result` - A reference to the `serde_json::Value` representing the search result.
+///
+/// # Returns
+/// A `Vec<DocEntry>` containing the parsed documentation entries.
 fn extract_doc_entries(result: &serde_json::Value) -> Vec<DocEntry<'_>> {
     let texts = extract_content_texts(result);
 
@@ -157,11 +215,9 @@ fn extract_doc_entries(result: &serde_json::Value) -> Vec<DocEntry<'_>> {
             // Parse "Link: <URL>" pattern
             let url = text.lines().find_map(|line| {
                 let trimmed = line.trim();
-                if trimmed.starts_with("Link: ") {
-                    return Some(trimmed.strip_prefix("Link: ").unwrap().trim().to_owned());
-                } else {
-                    None
-                }
+                trimmed
+                    .strip_prefix("Link: ")
+                    .map(|url_part| url_part.trim().to_owned())
             });
 
             DocEntry { url, text }
@@ -169,12 +225,27 @@ fn extract_doc_entries(result: &serde_json::Value) -> Vec<DocEntry<'_>> {
         .collect()
 }
 
-/// Format search results as JSON
+/// Formats a search result as a pretty-printed JSON string.
+///
+/// # Arguments
+/// * `result` - A reference to the `serde_json::Value` to format.
+///
+/// # Returns
+/// A `Result` containing the formatted JSON string, or an error if serialization fails.
 fn format_json(result: &serde_json::Value) -> Result<String> {
     Ok(serde_json::to_string_pretty(result)?)
 }
 
-/// Format search results as plain text
+/// Formats a search result as a plain text string.
+///
+/// It extracts the text content from the result and joins it with newlines.
+/// If no text content is found, it falls back to a pretty-printed JSON representation.
+///
+/// # Arguments
+/// * `result` - A reference to the `serde_json::Value` to format.
+///
+/// # Returns
+/// A `Result` containing the formatted plain text string.
 fn format_text(result: &serde_json::Value) -> Result<String> {
     let texts = extract_content_texts(result);
 
@@ -185,12 +256,19 @@ fn format_text(result: &serde_json::Value) -> Result<String> {
     }
 }
 
-/// Format search results as markdown with raw MDX fetching
+/// Formats a search result as a Markdown string by fetching the raw MDX content from URLs.
 ///
-/// Extracts URLs from search results, fetches raw MDX source from each URL
-/// with `Accept: text/markdown` header, and aggregates the content.
+/// This function extracts `DocEntry` items from the search result. For each entry with a URL,
+/// it attempts to fetch the full MDX content. If successful, the content is included with a source
+/// comment. If the fetch fails or no URL is present, it falls back to the entry's text.
+/// The final output joins all parts with Markdown horizontal rules.
 ///
-/// On fetch failure, falls back to the original text content from search results.
+/// # Arguments
+/// * `result` - A reference to the `serde_json::Value` representing the search result.
+/// * `client` - A reference to the `BunDocsClient` for fetching MDX content.
+///
+/// # Returns
+/// A `Result` containing the aggregated and formatted Markdown string.
 async fn format_markdown(
     result: &serde_json::Value,
     client: &http::BunDocsClient,
@@ -238,7 +316,15 @@ async fn format_markdown(
     Ok(mdx_parts.join("\n\n---\n\n"))
 }
 
-/// Validate output path to prevent directory traversal attacks
+/// Validates a file path to ensure it does not contain directory traversal components (e.g., `..`).
+///
+/// This is a security measure to prevent writing files outside of the intended directory.
+///
+/// # Arguments
+/// * `path` - The file path string to validate.
+///
+/// # Returns
+/// An `Ok(())` if the path is valid, or an `Err(String)` if it contains traversal components.
 fn validate_output_path(path: &str) -> Result<(), String> {
     let path_obj = std::path::Path::new(path);
 
@@ -252,7 +338,19 @@ fn validate_output_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Execute a direct search query in CLI mode
+/// Executes a search query in CLI mode, formats the result, and writes it to the specified output.
+///
+/// This function orchestrates the CLI search functionality. It builds and sends a `tools/call`
+/// request to the Bun Docs API, formats the response according to the user's choice
+/// (JSON, text, or Markdown), and writes the output to a file or `stdout`.
+///
+/// # Arguments
+/// * `query` - The search query string.
+/// * `format` - The desired `OutputFormat` for the results.
+/// * `output_path` - An optional file path to write the output to. If `None`, output is written to `stdout`.
+///
+/// # Returns
+/// An `anyhow::Result<()>` indicating success or failure.
 async fn direct_search(
     query: &str,
     format: &OutputFormat,
@@ -403,6 +501,18 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Handles a `tools/call` JSON-RPC request by forwarding it to the Bun Docs API.
+///
+/// This function takes an incoming `tools/call` request, constructs a new request
+/// with the same parameters, and sends it to the Bun Docs API via the `BunDocsClient`.
+/// It then processes the response, extracting the `result` field on success.
+///
+/// # Arguments
+/// * `client` - A reference to the `BunDocsClient` for making the API call.
+/// * `request` - A reference to the incoming `JsonRpcRequest`.
+///
+/// # Returns
+/// A `JsonRpcResponse` to be sent back to the client.
 async fn handle_tools_call(
     client: &http::BunDocsClient,
     request: &JsonRpcRequest,
@@ -421,6 +531,10 @@ async fn handle_tools_call(
 
             // Based on protocol analysis, the SSE data contains
             // the complete JSON-RPC response. Extract the result field.
+            #[allow(
+                clippy::option_if_let_else,
+                reason = "clearer with explicit pattern match"
+            )]
             if let Some(result_field) = result.get("result") {
                 JsonRpcResponse::success(request.id.clone(), result_field.clone())
             } else {
@@ -438,6 +552,15 @@ async fn handle_tools_call(
     }
 }
 
+/// Handles a `tools/list` JSON-RPC request by returning a static list of available tools.
+///
+/// Currently, this returns a single tool: `SearchBun`.
+///
+/// # Arguments
+/// * `request` - A reference to the incoming `JsonRpcRequest`.
+///
+/// # Returns
+/// A `JsonRpcResponse` containing the list of tools.
 fn handle_tools_list(request: &JsonRpcRequest) -> JsonRpcResponse {
     // Return available tools
     let tools = serde_json::json!({
@@ -460,6 +583,15 @@ fn handle_tools_list(request: &JsonRpcRequest) -> JsonRpcResponse {
     JsonRpcResponse::success(request.id.clone(), tools)
 }
 
+/// Handles a `resources/list` JSON-RPC request by returning a static list of available resources.
+///
+/// Currently, this returns a single resource: `bun://docs`.
+///
+/// # Arguments
+/// * `request` - A reference to the incoming `JsonRpcRequest`.
+///
+/// # Returns
+/// A `JsonRpcResponse` containing the list of resources.
 fn handle_resources_list(request: &JsonRpcRequest) -> JsonRpcResponse {
     // Return available resources
     let resources = serde_json::json!({
@@ -474,6 +606,18 @@ fn handle_resources_list(request: &JsonRpcRequest) -> JsonRpcResponse {
     JsonRpcResponse::success(request.id.clone(), resources)
 }
 
+/// Handles a `resources/read` JSON-RPC request.
+///
+/// This function parses the `uri` from the request parameters, extracts a search query
+/// from it, and then internally forwards the request as a `tools/call` to the
+/// `SearchBun` tool. The result from the API is then wrapped in the MCP resource format.
+///
+/// # Arguments
+/// * `client` - A reference to the `BunDocsClient` for making the API call.
+/// * `request` - A reference to the incoming `JsonRpcRequest`.
+///
+/// # Returns
+/// A `JsonRpcResponse` containing the resource content or an error.
 async fn handle_resources_read(
     client: &http::BunDocsClient,
     request: &JsonRpcRequest,
@@ -557,6 +701,14 @@ async fn handle_resources_read(
     }
 }
 
+/// Handles an `initialize` JSON-RPC request by returning the protocol version,
+/// capabilities, and server information.
+///
+/// # Arguments
+/// * `request` - A reference to the incoming `JsonRpcRequest`.
+///
+/// # Returns
+/// A `JsonRpcResponse` containing the initialization result.
 fn handle_initialize(request: &JsonRpcRequest) -> JsonRpcResponse {
     // Handle MCP initialize request
     let init_result = serde_json::json!({
