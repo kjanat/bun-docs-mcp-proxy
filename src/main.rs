@@ -289,7 +289,8 @@ async fn format_markdown(
     for entry in doc_entries {
         if let Some(url) = entry.url {
             // Try to fetch MDX from the URL
-            match client.fetch_doc_markdown(&url).await {
+            let fetch_result = client.fetch_doc_markdown(&url).await;
+            match fetch_result {
                 Ok(mdx) => {
                     // Success: include URL comment and MDX content
                     let mut part = String::new();
@@ -430,7 +431,8 @@ async fn main() -> Result<()> {
 
     loop {
         // Read JSON-RPC request from stdin
-        let message = match transport.read_message().await {
+        let read_result = transport.read_message().await;
+        let message = match read_result {
             Ok(Some(msg)) => msg,
             Ok(None) => {
                 info!("Connection closed");
@@ -453,7 +455,8 @@ async fn main() -> Result<()> {
                     format!("Parse error: {e}"),
                 );
                 if let Ok(response_str) = serde_json::to_string(&error_response) {
-                    let _ = transport.write_message(&response_str).await;
+                    let write_result = transport.write_message(&response_str).await;
+                    let _ = write_result;
                 }
                 continue;
             }
@@ -479,9 +482,11 @@ async fn main() -> Result<()> {
         };
 
         // Send response back to stdout
-        match serde_json::to_string(&response) {
+        let serialize_result = serde_json::to_string(&response);
+        match serialize_result {
             Ok(response_str) => {
-                if let Err(e) = transport.write_message(&response_str).await {
+                let write_result = transport.write_message(&response_str).await;
+                if let Err(e) = write_result {
                     error!("Failed to write response: {}", e);
                     break;
                 }

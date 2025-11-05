@@ -737,22 +737,20 @@ async fn test_direct_search_markdown_format() {
 
 #[tokio::test]
 async fn test_direct_search_with_output_file() {
-    let temp_dir = std::env::temp_dir();
-    let output_path = temp_dir.join("test_search_output.json");
-    let output_str = output_path.to_str().unwrap();
+    let temp_file = tempfile::NamedTempFile::new().unwrap();
+    let output_str = temp_file.path().to_str().unwrap();
 
     let result = direct_search("test", &OutputFormat::Json, Some(output_str)).await;
     result.unwrap();
 
     // Verify file was created
-    assert!(output_path.exists());
+    assert!(temp_file.path().exists());
 
     // Read and verify content
-    let content = std::fs::read_to_string(&output_path).unwrap();
+    let content = std::fs::read_to_string(temp_file.path()).unwrap();
     assert!(!content.is_empty());
 
-    // Cleanup
-    let _ = std::fs::remove_file(&output_path);
+    // tempfile automatically cleans up on drop
 }
 
 #[tokio::test]
@@ -764,23 +762,21 @@ async fn test_direct_search_empty_query() {
 
 #[tokio::test]
 async fn test_direct_search_markdown_with_file() {
-    let temp_dir = std::env::temp_dir();
-    let output_path = temp_dir.join("test_markdown_output.md");
-    let output_str = output_path.to_str().unwrap();
+    let temp_file = tempfile::NamedTempFile::new().unwrap();
+    let output_str = temp_file.path().to_str().unwrap();
 
     let result = direct_search("Bun", &OutputFormat::Markdown, Some(output_str)).await;
     result.unwrap();
 
     // Verify file was created
-    assert!(output_path.exists());
+    assert!(temp_file.path().exists());
 
     // Read and verify markdown content (may include URL comments or MDX)
-    let content = std::fs::read_to_string(&output_path).unwrap();
+    let content = std::fs::read_to_string(temp_file.path()).unwrap();
     assert!(!content.is_empty(), "Markdown output should not be empty");
     // The content could be raw MDX with URL comments or fallback text
 
-    // Cleanup
-    let _ = std::fs::remove_file(&output_path);
+    // tempfile automatically cleans up on drop
 }
 
 #[test]
@@ -812,24 +808,22 @@ async fn test_direct_search_invalid_output_path() {
 
 #[tokio::test]
 async fn test_direct_search_file_overwrite() {
-    let temp_dir = std::env::temp_dir();
-    let output_path = temp_dir.join("test_overwrite.json");
-    let output_str = output_path.to_str().unwrap();
+    let temp_file = tempfile::NamedTempFile::new().unwrap();
+    let output_str = temp_file.path().to_str().unwrap();
 
     // Create existing file
-    fs::write(&output_path, "existing content").unwrap();
-    assert!(output_path.exists());
+    fs::write(temp_file.path(), "existing content").unwrap();
+    assert!(temp_file.path().exists());
 
     // Should overwrite with warning
     let result = direct_search("test", &OutputFormat::Json, Some(output_str)).await;
     result.unwrap();
 
     // Verify new content
-    let content = std::fs::read_to_string(&output_path).unwrap();
+    let content = std::fs::read_to_string(temp_file.path()).unwrap();
     assert!(!content.contains("existing content"));
 
-    // Cleanup
-    let _ = std::fs::remove_file(&output_path);
+    // tempfile automatically cleans up on drop
 }
 
 #[tokio::test]

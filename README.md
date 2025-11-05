@@ -46,7 +46,7 @@ task test  # or: cargo test
 task test-integration-only  # or: cargo test --features integration-tests
 
 # Run all tests including integration
-task test-with-integration  # or: cargo test --features integration-tests --all-features
+task test-with-integration  # or: cargo test --all-features
 ```
 
 ### Test Strategy

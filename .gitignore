@@ -18,7 +18,6 @@ junit.xml
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Logs
-logs
 logs/
 *.log
 
@@ -54,7 +53,6 @@ rust-project.json
 
 
 ### Node.js (legacy/test dependencies) ###
-node_modules
 node_modules/
 *.tgz
 

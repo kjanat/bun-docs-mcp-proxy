@@ -82,7 +82,12 @@ mod http_test_utils {
 
             let mut event_stream = response.bytes_stream().eventsource();
 
-            while let Some(event_result) = event_stream.next().await {
+            loop {
+                let event_result = event_stream.next().await;
+                let event_result = match event_result {
+                    Some(r) => r,
+                    None => break,
+                };
                 match event_result {
                     Ok(event) => {
                         if let Some(json_response) = Self::parse_sse_event_data(&event.data)? {

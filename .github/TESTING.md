@@ -55,7 +55,7 @@ cargo test --features integration-tests test_handle_tools_call_real_api
 
 ### File Structure
 
-```
+```text
 src/
 ├── main_tests.rs          # All unit and integration tests
 │   ├── Unit tests         # Always run (65+ tests)

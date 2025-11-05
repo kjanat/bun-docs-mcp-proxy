@@ -378,7 +378,12 @@ impl BunDocsClient {
         let mut event_stream = response.bytes_stream().eventsource();
         let mut json_response: Option<Value> = None;
 
-        while let Some(event_result) = event_stream.next().await {
+        loop {
+            let event_result = event_stream.next().await;
+            let event_result = match event_result {
+                Some(r) => r,
+                None => break,
+            };
             match event_result {
                 Ok(event) => {
                     debug!("SSE event type: {:?}", event.event);
