@@ -19,10 +19,10 @@ server at `https://bun.com/docs/mcp`.
 ## Building
 
 ```bash
-cargo build --release
+task br  # or: cargo build --release
 ```
 
-The binary will be at [`target/release/bun-docs-mcp-proxy`][target-output].
+The binary will be at `target/release/bun-docs-mcp-proxy`.
 
 ## Running
 
@@ -40,13 +40,13 @@ This project uses a **dual testing strategy**: fast unit tests by default, with 
 
 ```bash
 # Run unit tests only (fast, no network)
-task test  # or: cargo test
+task t  # or: cargo test
 
 # Run integration tests (requires network)
-task test-integration-only  # or: cargo test --features integration-tests
+task tio  # or: cargo test --features integration-tests
 
 # Run all tests including integration
-task test-with-integration  # or: cargo test --all-features
+task twi  # or: cargo test --all-features
 ```
 
 ### Test Strategy
@@ -67,48 +67,62 @@ task test-with-integration  # or: cargo test --all-features
 Generate HTML coverage report:
 
 ```bash
-make coverage
+task covh
 # Opens target/llvm-cov/html/index.html
 ```
 
 Show coverage summary in terminal:
 
 ```bash
-make coverage-text
+task covt
 # Or: cargo llvm-cov
 ```
 
 Generate coverage in different formats:
 
 ```bash
-# LCOV format (for CI)
+# JSON format (for CI)
+task coverage-nextest
+# Generates codecov.json
+
+# LCOV format
 cargo llvm-cov --lcov --output-path lcov.info
 
 # Cobertura XML format
 cargo llvm-cov --cobertura --output-path cobertura.xml
-
-# JSON format
-cargo llvm-cov --json --output-path coverage.json
 ```
 
 ### JUnit Test Results
 
-For JUnit XML test results (separate from coverage), install cargo-nextest:
+For JUnit XML test results (separate from coverage):
 
 ```bash
-cargo install cargo-nextest --locked
-
-# Generate JUnit XML
-cargo nextest run --profile ci --junit junit.xml
+task tn  # or: cargo nextest run --all-features --workspace --profile ci
+# Generates target/nextest/ci/junit.xml
 ```
 
 ### Manual Testing
 
-Test a specific method:
+Test specific MCP methods:
 
 ```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"SearchBun","arguments":{"query":"Bun.serve"}}}' | \
-./target/release/bun-docs-mcp-proxy
+# Initialize
+task test-mcp-init
+
+# List tools
+task test-mcp-tools-list
+
+# Call SearchBun tool
+task test-mcp-tools-call
+
+# List resources
+task test-mcp-resources-list
+
+# Read resource
+task test-mcp-resources-read
+
+# Run all manual tests
+task test-mcp-all
 ```
 
 ### Development Tools
@@ -116,14 +130,14 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"SearchBun"
 Install recommended dev tools:
 
 ```bash
-make install-tools
-# Installs: cargo-llvm-cov, cargo-watch, llvm-tools-preview
+task install-tools
+# Installs: cargo-llvm-cov, cargo-nextest, cargo-watch, cargo-zigbuild, llvm-tools-preview
 ```
 
 Watch mode for continuous testing:
 
 ```bash
-make watch
+task watch
 # Or: cargo watch -x test
 ```
 
@@ -255,26 +269,43 @@ The proxy handles errors gracefully and returns proper JSON-RPC error responses:
 
 ## Building for Other Platforms
 
-### Linux ARM64
+### Native Builds
 
 ```bash
-cargo build --release --target aarch64-unknown-linux-gnu
+# Linux x86_64 (GNU)
+task build-linux-gnu
+
+# macOS Intel
+task build-macos-intel
+
+# macOS Apple Silicon
+task build-macos-arm
+
+# Windows x86_64
+task build-windows
 ```
 
-### macOS (from macOS)
+### Cross-Compilation (requires cargo-zigbuild)
 
 ```bash
-# Intel Mac
-cargo build --release --target x86_64-apple-darwin
+# Linux ARM64
+task build-linux-arm64
 
-# Apple Silicon (M1/M2/M3)
-cargo build --release --target aarch64-apple-darwin
+# Linux x86_64 (musl, static)
+task build-linux-musl
+
+# Linux ARM64 (musl, static)
+task build-linux-arm64-musl
 ```
 
-### Windows (from Windows)
+### All Platforms
 
 ```bash
-cargo build --release --target x86_64-pc-windows-msvc
+# Build all native targets
+task build-all-native
+
+# Build all cross-compilation targets
+task build-all-cross
 ```
 
 ## License
@@ -286,13 +317,30 @@ cargo build --release --target x86_64-pc-windows-msvc
 Built with:
 
 - Rust 1.81.0+
-- Cargo
+- Cargo + [Task](https://taskfile.dev) for build automation
 - Standard async Rust ecosystem
 
-See [docs/protocol-analysis.md][protocol-analysis.md]
-for protocol details.  
-See [docs/rmcp-evaluation.md][rmcp-evaluation.md]
-for architecture decisions.
+### Quick Commands
+
+```bash
+# List all available tasks
+task --list-all
+
+# Build + test + lint
+task c  # or: task check
+
+# Watch mode (auto-rebuild)
+task dev
+
+# Run CI checks locally
+task ci
+
+# Show current version
+task version
+```
+
+See [docs/protocol-analysis.md][protocol-analysis.md] for protocol details.  
+See [docs/rmcp-evaluation.md][rmcp-evaluation.md] for architecture decisions.
 
 <!--Link defs-->
 
@@ -302,4 +350,3 @@ for architecture decisions.
 [protocol-analysis.md]: https://github.com/kjanat/bun-docs-mcp-zed/blob/16daa944a9fb12d58a19c23751f5b4bb18fb3a68/docs/protocol-analysis.md
 [release.yml]: https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/release.yml
 [rmcp-evaluation.md]: https://github.com/kjanat/bun-docs-mcp-zed/blob/16daa944a9fb12d58a19c23751f5b4bb18fb3a68/docs/rmcp-evaluation.md
-[target-output]: ./target/release/bun-docs-mcp-proxy
