@@ -1,0 +1,21 @@
+# CODEOWNERS file for bun-docs-mcp-proxy
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything in the repo
+* @kjanat
+
+# CI/CD workflows require review
+/.github/workflows/ @kjanat
+
+# Security-sensitive files
+/SECURITY.md @kjanat
+/Cargo.toml @kjanat
+/Cargo.lock @kjanat
+
+# Core source code
+/src/ @kjanat
+
+# Documentation
+/docs/ @kjanat
+/README.md @kjanat
+/CLAUDE.md @kjanat

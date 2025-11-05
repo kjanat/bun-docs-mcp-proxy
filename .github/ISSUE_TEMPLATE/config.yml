@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/kjanat/bun-docs-mcp-proxy/blob/master/README.md
+    about: Read the project documentation and usage examples
+  - name: Discussions
+    url: https://github.com/kjanat/bun-docs-mcp-proxy/discussions
+    about: Ask questions and discuss ideas with the community
