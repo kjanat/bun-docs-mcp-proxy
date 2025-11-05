@@ -598,9 +598,21 @@ mod tests {
         assert!(truncated_unicode.is_char_boundary(truncated_unicode.len()));
     }
 
+    // Unit tests with mocked HTTP responses (fast, deterministic, offline-friendly)
     #[tokio::test]
     async fn forward_request_tools_list() {
-        let client = BunDocsClient::new();
+        let mut server = mockito::Server::new_async().await;
+
+        let mock = server
+            .mock("POST", "/")
+            .with_status(200_usize)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"result": {"tools": [{"name": "SearchBun", "description": "Search Bun documentation"}]}}"#)
+            .expect(1_usize)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
         let request = json!({
             "jsonrpc": "2.0",
             "id": 1_i32,
@@ -608,7 +620,13 @@ mod tests {
         });
 
         let result = client.forward_request(request).await;
-        assert!(result.is_ok());
+
+        mock.assert_async().await;
+        drop(server);
+        assert!(
+            result.is_ok(),
+            "Should successfully forward tools/list request"
+        );
 
         let response = result.expect("successful response");
         assert!(response.get("result").is_some());
@@ -619,6 +637,68 @@ mod tests {
 
     #[tokio::test]
     async fn forward_request_tools_call() {
+        let mut server = mockito::Server::new_async().await;
+
+        let mock = server
+            .mock("POST", "/")
+            .with_status(200_usize)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"result": {"content": [{"type": "text", "text": "Bun.serve() documentation..."}]}}"#)
+            .expect(1_usize)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 2_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "SearchBun",
+                "arguments": {
+                    "query": "Bun.serve"
+                }
+            }
+        });
+
+        let result = client.forward_request(request).await;
+
+        mock.assert_async().await;
+        drop(server);
+        assert!(
+            result.is_ok(),
+            "Should successfully forward tools/call request"
+        );
+
+        let response = result.expect("successful response");
+        assert!(response.get("result").is_some());
+    }
+
+    // Integration tests against live Bun Docs API (require network, can be flaky)
+    // Run with: cargo test --ignored
+    #[tokio::test]
+    #[ignore = "requires network access to live Bun Docs API"]
+    async fn integration_forward_request_tools_list() {
+        let client = BunDocsClient::new();
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/list"
+        });
+
+        let result = client.forward_request(request).await;
+        assert!(result.is_ok(), "Live API should respond to tools/list");
+
+        let response = result.expect("successful response");
+        assert!(response.get("result").is_some());
+        // Bun Docs should return tools
+        let result_field = response.get("result").expect("result field should exist");
+        assert!(result_field.get("tools").is_some());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires network access to live Bun Docs API"]
+    async fn integration_forward_request_tools_call() {
         let client = BunDocsClient::new();
         let request = json!({
             "jsonrpc": "2.0",
@@ -633,7 +713,7 @@ mod tests {
         });
 
         let result = client.forward_request(request).await;
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Live API should respond to tools/call");
 
         let response = result.expect("successful response");
         assert!(response.get("result").is_some());
@@ -641,6 +721,40 @@ mod tests {
 
     #[tokio::test]
     async fn forward_request_error_response() {
+        let mut server = mockito::Server::new_async().await;
+
+        let mock = server
+            .mock("POST", "/")
+            .with_status(200_usize)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"error": {"code": -32601, "message": "Method not found"}}"#)
+            .expect(1_usize)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 3_i32,
+            "method": "invalid_method_that_does_not_exist"
+        });
+
+        let result = client.forward_request(request).await;
+
+        mock.assert_async().await;
+        drop(server);
+        assert!(result.is_ok(), "Should receive JSON-RPC error response");
+
+        let response = result.expect("successful HTTP response");
+        assert!(
+            response.get("error").is_some(),
+            "Expected error field in JSON-RPC response"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires network access to live Bun Docs API"]
+    async fn integration_forward_request_error_response() {
         let client = BunDocsClient::new();
         let request = json!({
             "jsonrpc": "2.0",
