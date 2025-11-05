@@ -170,9 +170,171 @@ jobs:
           name: bun-docs-mcp-proxy-${{ matrix.platform.name }}
           path: target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip
 
+  publish-crates:
+    name: Publish to crates.io
+    needs: lint
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish
+
+  package-deb:
+    name: Build Debian packages
+    needs: lint
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}-deb
+
+      - name: Install cargo-deb
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb
+
+      - name: Install cross-compilation tools (ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build and create .deb package
+        run: cargo deb --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Rename .deb file
+        run: |
+          DEB_FILE=$(find target/${{ matrix.target }}/debian -name "*.deb")
+          ARCH=$(echo ${{ matrix.target }} | cut -d- -f1)
+          mv "$DEB_FILE" "target/${{ matrix.target }}/debian/bun-docs-mcp-proxy_${ARCH}.deb"
+
+      - name: Generate attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: "target/${{ matrix.target }}/debian/*.deb"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: deb-${{ matrix.target }}
+          path: target/${{ matrix.target }}/debian/*.deb
+
+  package-aur:
+    name: Generate AUR package
+    needs: lint
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-aur
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-aur
+
+      - name: Generate AUR package
+        run: cargo aur
+
+      - name: Generate attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: "target/cargo-aur/*.tar.gz"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: aur-package
+          path: |
+            target/cargo-aur/*.tar.gz
+            target/cargo-aur/PKGBUILD
+
+  publish-npm:
+    name: Publish to npm
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify release artifacts are available
+        run: |
+          # Extract version from tag
+          VERSION=${GITHUB_REF#refs/tags/v}
+
+          # Wait a bit for GitHub to make release assets fully available
+          echo "Waiting 30 seconds for release assets to propagate..."
+          sleep 30
+
+          # Verify key artifacts are accessible
+          echo "Verifying release artifacts..."
+          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/SHA256SUMS" -o /tmp/checksums
+          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/bun-docs-mcp-proxy-linux-x86_64.tar.gz" --head
+
+          echo "✓ Release artifacts verified and accessible"
+
+      - name: Publish to npm
+        working-directory: npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish
+
   release:
     name: Create Release
-    needs: build
+    needs: [build, package-deb, package-aur]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
@@ -189,8 +351,8 @@ jobs:
       - name: Generate checksums
         run: |
           cd artifacts
-          # Generate SHA256SUMS file
-          find . -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec sha256sum {} \; | sed 's|./[^/]*/||' > SHA256SUMS
+          # Generate SHA256SUMS file for binaries and packages
+          find . -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.deb" \) -exec sha256sum {} \; | sed 's|./[^/]*/||' > SHA256SUMS
           cat SHA256SUMS
 
       - name: Create Release
@@ -204,11 +366,32 @@ jobs:
           cat > release_notes.md << 'EOF'
           ## Bun Docs MCP Proxy ${{ github.ref_name }}
 
-          ### Installation
+          ### Installation Options
 
-          Download the binary for your platform below, extract it, and make it executable (Linux/macOS).
+          #### Package Managers (Recommended)
 
-          #### Linux/macOS
+          ```bash
+          # Rust (from source)
+          cargo install bun-docs-mcp-proxy
+
+          # Rust (pre-built binaries, faster)
+          cargo binstall bun-docs-mcp-proxy
+
+          # npm/Node.js
+          npm install -g bun-docs-mcp-proxy
+
+          # Debian/Ubuntu (x86_64 or ARM64)
+          wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/bun-docs-mcp-proxy_x86_64.deb
+          sudo dpkg -i bun-docs-mcp-proxy_x86_64.deb
+
+          # Arch Linux (AUR)
+          # Download PKGBUILD from this release and build with makepkg
+          # Or wait for AUR package publication
+          ```
+
+          #### Direct Binary Download
+
+          **Linux/macOS:**
           ```bash
           # Download and extract (adjust URL for your platform)
           curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/bun-docs-mcp-proxy-linux-x86_64.tar.gz | tar xz
@@ -220,11 +403,16 @@ jobs:
           sudo mv bun-docs-mcp-proxy /usr/local/bin/
           ```
 
-          #### Windows
+          **Windows:**
           Download the `.zip` file, extract it, and add to your PATH.
 
-          ### Platforms
+          ### Available Downloads
 
+          **Debian Packages:**
+          - **Debian/Ubuntu x86_64**: `bun-docs-mcp-proxy_x86_64.deb`
+          - **Debian/Ubuntu ARM64**: `bun-docs-mcp-proxy_aarch64.deb`
+
+          **Binary Archives:**
           - **Linux x86_64**: `bun-docs-mcp-proxy-linux-x86_64.tar.gz`
           - **Linux ARM64**: `bun-docs-mcp-proxy-linux-aarch64.tar.gz`
           - **Linux x86_64 musl** (static): `bun-docs-mcp-proxy-linux-x86_64-musl.tar.gz`
@@ -233,6 +421,9 @@ jobs:
           - **macOS Apple Silicon**: `bun-docs-mcp-proxy-macos-aarch64.tar.gz`
           - **Windows x86_64**: `bun-docs-mcp-proxy-windows-x86_64.zip`
           - **Windows ARM64**: `bun-docs-mcp-proxy-windows-aarch64.zip`
+
+          **AUR Package:**
+          - `PKGBUILD` and source tarball included for Arch Linux users
 
           ### Verification
 
@@ -281,4 +472,6 @@ jobs:
             --notes-file release_notes.md \
             artifacts/*/*.tar.gz \
             artifacts/*/*.zip \
+            artifacts/*/*.deb \
+            artifacts/aur-package/* \
             artifacts/SHA256SUMS

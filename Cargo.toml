@@ -4,6 +4,31 @@ version = "0.2.1"
 edition = "2024"
 description = "MCP proxy for Bun documentation search"
 license = "MIT"
+repository = "https://github.com/kjanat/bun-docs-mcp-proxy"
+homepage = "https://github.com/kjanat/bun-docs-mcp-proxy"
+keywords = ["mcp", "bun", "documentation", "proxy", "json-rpc"]
+categories = ["command-line-utilities", "development-tools"]
+
+[package.metadata.deb]
+maintainer = "kjanat"
+copyright = "2025, kjanat <https://github.com/kjanat>"
+license-file = ["LICENSE", "4"]
+extended-description = """\
+Native Rust proxy for Bun documentation MCP context server. \
+Bridges stdio-based MCP clients with the Bun HTTP MCP server at https://bun.com/docs/mcp. \
+\
+Features zero runtime dependencies, 2.7 MB binary size, 4ms cold start, \
+and comprehensive error handling."""
+depends = "$auto"
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/bun-docs-mcp-proxy", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/bun-docs-mcp-proxy/", "644"],
+]
+
+[package.metadata.aur]
+depends = []
 
 [dependencies]
 anyhow = "1.0"
@@ -36,3 +61,34 @@ strip = true  # Remove debug symbols
 lto = true  # Link-time optimization
 panic = "abort"  # Smaller binary
 codegen-units = 1  # Better optimization
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.{ archive-format }"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-unknown-linux-gnu]
+pkg-url = "{ repo }/releases/download/v{ version }/bun-docs-mcp-proxy-linux-x86_64.tar.gz"
+
+[package.metadata.binstall.overrides.aarch64-unknown-linux-gnu]
+pkg-url = "{ repo }/releases/download/v{ version }/bun-docs-mcp-proxy-linux-aarch64.tar.gz"
+
+[package.metadata.binstall.overrides.x86_64-unknown-linux-musl]
+pkg-url = "{ repo }/releases/download/v{ version }/bun-docs-mcp-proxy-linux-x86_64-musl.tar.gz"
+
+[package.metadata.binstall.overrides.aarch64-unknown-linux-musl]
+pkg-url = "{ repo }/releases/download/v{ version }/bun-docs-mcp-proxy-linux-aarch64-musl.tar.gz"
+
+[package.metadata.binstall.overrides.x86_64-apple-darwin]
+pkg-url = "{ repo }/releases/download/v{ version }/bun-docs-mcp-proxy-macos-x86_64.tar.gz"
+
+[package.metadata.binstall.overrides.aarch64-apple-darwin]
+pkg-url = "{ repo }/releases/download/v{ version }/bun-docs-mcp-proxy-macos-aarch64.tar.gz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/bun-docs-mcp-proxy-windows-x86_64.zip"
+pkg-fmt = "zip"
+
+[package.metadata.binstall.overrides.aarch64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/bun-docs-mcp-proxy-windows-aarch64.zip"
+pkg-fmt = "zip"

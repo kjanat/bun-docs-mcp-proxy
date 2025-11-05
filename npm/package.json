@@ -1,0 +1,37 @@
+{
+  "name": "bun-docs-mcp-proxy",
+  "version": "0.2.1",
+  "description": "MCP proxy for Bun documentation search - native binary distribution",
+  "keywords": [
+    "mcp",
+    "bun",
+    "documentation",
+    "proxy",
+    "json-rpc",
+    "model-context-protocol"
+  ],
+  "homepage": "https://github.com/kjanat/bun-docs-mcp-proxy",
+  "bugs": {
+    "url": "https://github.com/kjanat/bun-docs-mcp-proxy/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kjanat/bun-docs-mcp-proxy.git"
+  },
+  "license": "MIT",
+  "author": "kjanat",
+  "bin": {
+    "bun-docs-mcp-proxy": "./bin/bun-docs-mcp-proxy.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "files": [
+    "bin",
+    "scripts",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

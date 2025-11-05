@@ -1,0 +1,8 @@
+# Don't include binaries in the package - they're downloaded during postinstall
+bin/*
+!bin/bun-docs-mcp-proxy.js
+
+# Development files
+*.log
+.DS_Store
+node_modules/
