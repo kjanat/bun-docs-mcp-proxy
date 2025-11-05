@@ -68,14 +68,29 @@ tasks:
 
   # ===== Test Tasks =====
   test:
-    desc: Run all tests with all features
+    desc: Run all tests (unit tests only by default, no network calls)
     aliases: [t]
-    cmd: cargo test --all-features {{.CLI_ARGS}}
+    cmd: cargo test {{.CLI_ARGS}}
 
   test-unit:
-    desc: Run unit tests only
+    desc: Run unit tests only (fast, no network)
     aliases: [tu]
     cmd: cargo test --bins {{.CLI_ARGS}}
+
+  test-unit-only:
+    desc: Run only mocked unit tests (excludes integration tests)
+    aliases: [tuo]
+    cmd: cargo test {{.CLI_ARGS}}
+
+  test-integration-only:
+    desc: Run integration tests with real API calls (requires network)
+    aliases: [tio]
+    cmd: cargo test --features integration-tests {{.CLI_ARGS}}
+
+  test-with-integration:
+    desc: Run all tests including integration tests (requires network)
+    aliases: [twi]
+    cmd: cargo test --features integration-tests --all-features {{.CLI_ARGS}}
 
   test-doc:
     desc: Run documentation tests (N/A for binary-only crates)

@@ -36,6 +36,12 @@ mockito = "1"
 predicates = "3"
 tempfile = "3"
 
+[features]
+default = []
+# Enable integration tests that make real API calls to bun.com
+# These are disabled by default for faster CI runs
+integration-tests = []
+
 [lints.clippy]
 # Individual restriction lints (blanket restriction group is forbidden by clippy)
 # Note: Using "allow" for overly pedantic lints that fight idiomatic Rust

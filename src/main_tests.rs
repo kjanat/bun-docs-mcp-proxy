@@ -184,6 +184,91 @@ fn test_response_null_id() {
 }
 
 #[tokio::test]
+async fn test_handle_tools_call_mocked() {
+    // Mock successful API response without network call
+    let mut server = mockito::Server::new_async().await;
+
+    // Mock the SSE stream response
+    let mock = server
+        .mock("POST", "/")
+        .with_status(200)
+        .with_header("content-type", "text/event-stream")
+        .with_body("data: {\"result\":{\"content\":[{\"text\":\"Mocked Bun.serve documentation\",\"type\":\"text\"}]}}\n\n")
+        .expect(1)
+        .create_async()
+        .await;
+
+    let client = http::BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
+    let request = JsonRpcRequest {
+        jsonrpc: "2.0".to_owned(),
+        id: json!(1),
+        method: "tools/call".to_owned(),
+        params: Some(json!({
+            "name": "SearchBun",
+            "arguments": {
+                "query": "Bun.serve"
+            }
+        })),
+    };
+
+    let response = handle_tools_call(&client, &request).await;
+    let serialized = serde_json::to_value(&response).unwrap();
+
+    mock.assert_async().await;
+    drop(server);
+
+    // Verify successful response structure
+    assert!(serialized["result"].is_object());
+    assert!(serialized["result"]["content"].is_array());
+    let content = serialized["result"]["content"].as_array().unwrap();
+    assert!(!content.is_empty());
+    assert_eq!(content[0]["text"], "Mocked Bun.serve documentation");
+}
+
+#[tokio::test]
+async fn test_handle_resources_read_mocked() {
+    // Mock successful resource read without network call
+    let mut server = mockito::Server::new_async().await;
+
+    // Mock the SSE stream response for resource read
+    let mock = server
+        .mock("POST", "/")
+        .with_status(200)
+        .with_header("content-type", "text/event-stream")
+        .with_body("data: {\"result\":{\"content\":[{\"text\":\"Mocked HTTP documentation\",\"type\":\"text\"}]}}\n\n")
+        .expect(1)
+        .create_async()
+        .await;
+
+    let client = http::BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
+    let request = JsonRpcRequest {
+        jsonrpc: "2.0".to_owned(),
+        id: json!("res-mock"),
+        method: "resources/read".to_owned(),
+        params: Some(json!({"uri": "bun://docs?query=HTTP"})),
+    };
+
+    let response = handle_resources_read(&client, &request).await;
+    let serialized = serde_json::to_value(&response).unwrap();
+
+    mock.assert_async().await;
+    drop(server);
+
+    // Verify successful resource response structure
+    assert!(serialized["result"]["contents"].is_array());
+    let contents = serialized["result"]["contents"].as_array().unwrap();
+    assert_eq!(contents.len(), 1);
+    assert_eq!(contents[0]["uri"], "bun://docs?query=HTTP");
+    assert_eq!(contents[0]["mimeType"], "application/json");
+    assert!(contents[0]["text"].is_string());
+
+    // Verify the text contains the mocked result
+    let text_content = contents[0]["text"].as_str().unwrap();
+    assert!(text_content.contains("Mocked HTTP documentation"));
+}
+
+#[tokio::test]
+#[cfg(feature = "integration-tests")]
 async fn test_handle_tools_call_real_api() {
     let client = http::BunDocsClient::new();
     let request = JsonRpcRequest {
@@ -206,6 +291,7 @@ async fn test_handle_tools_call_real_api() {
 }
 
 #[tokio::test]
+#[cfg(feature = "integration-tests")]
 async fn test_handle_tools_call_empty_query() {
     // NOTE: This test reflects Bun API's current behavior for empty query.
     // As of now, Bun returns {"content":[{"text":"No results found","type":"text"}],"isError":true}
@@ -231,6 +317,7 @@ async fn test_handle_tools_call_empty_query() {
 }
 
 #[tokio::test]
+#[cfg(feature = "integration-tests")]
 async fn test_handle_resources_read_with_query() {
     let client = http::BunDocsClient::new();
     let request = JsonRpcRequest {
@@ -251,6 +338,7 @@ async fn test_handle_resources_read_with_query() {
 }
 
 #[tokio::test]
+#[cfg(feature = "integration-tests")]
 async fn test_handle_resources_read_empty_query() {
     // NOTE: Tests bun://docs (no query param) which proxy converts to empty query string.
     // Bun API currently returns "No results found" for empty queries.
@@ -339,6 +427,7 @@ async fn test_handle_resources_read_missing_uri_param() {
 }
 
 #[tokio::test]
+#[cfg(feature = "integration-tests")]
 async fn test_handle_resources_read_with_real_search() {
     let client = http::BunDocsClient::new();
     let request = JsonRpcRequest {
@@ -626,18 +715,21 @@ fn test_jsonrpc_error_code_constants() {
 }
 
 #[tokio::test]
+#[cfg(feature = "integration-tests")]
 async fn test_direct_search_json_format() {
     let result = direct_search("Bun.serve", &OutputFormat::Json, None).await;
     result.unwrap();
 }
 
 #[tokio::test]
+#[cfg(feature = "integration-tests")]
 async fn test_direct_search_text_format() {
     let result = direct_search("HTTP", &OutputFormat::Text, None).await;
     result.unwrap();
 }
 
 #[tokio::test]
+#[cfg(feature = "integration-tests")]
 async fn test_direct_search_markdown_format() {
     let result = direct_search("server", &OutputFormat::Markdown, None).await;
     result.unwrap();

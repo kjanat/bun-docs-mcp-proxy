@@ -9,6 +9,14 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# This CI workflow runs fast, network-free unit tests by default.
+# Integration tests that require real API calls to bun.com are disabled
+# for faster CI runs and better reliability.
+#
+# To run integration tests:
+# - Locally: cargo test --features integration-tests
+# - CI: See .github/workflows/integration-tests.yml (scheduled daily + manual)
+
 jobs:
   test:
     name: Test

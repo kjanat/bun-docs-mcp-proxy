@@ -1,0 +1,95 @@
+name: Integration Tests
+
+on:
+  # Run daily at 3 AM UTC
+  schedule:
+    - cron: "0 3 * * *"
+
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      verbose:
+        description: "Enable verbose output"
+        required: false
+        default: "false"
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  integration-tests:
+    name: Integration Tests (Real API)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      RUSTFLAGS: -D warnings
+      RUST_LOG: ${{ github.event.inputs.verbose == 'true' && 'debug' || 'info' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Run integration tests with real API
+        run: |
+          echo "::group::Running integration tests against bun.com/docs/mcp"
+          cargo test --features integration-tests --all-targets
+          echo "::endgroup::"
+        # Continue even if some tests fail (network issues, API changes, etc)
+        continue-on-error: true
+
+      - name: Run integration tests with nextest
+        run: |
+          echo "::group::Running integration tests with nextest"
+          cargo nextest run --features integration-tests --all-targets --profile ci
+          echo "::endgroup::"
+        continue-on-error: true
+
+      - name: Generate coverage for integration tests
+        run: |
+          echo "::group::Generating coverage for integration tests"
+          cargo llvm-cov --features integration-tests --codecov --output-path integration-coverage.json
+          echo "::endgroup::"
+        continue-on-error: true
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        if: always()
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: integration-coverage.json
+          flags: integration
+          fail_ci_if_error: false
+
+      - name: Upload test results
+        uses: codecov/test-results-action@v1
+        if: always()
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: integration
+        continue-on-error: true
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Integration Test Summary"
+            echo ""
+            echo "Integration tests against live Bun API completed."
+            echo "Note: Failures may be due to network issues or API changes."
+            echo ""
+            echo "To run locally: \`cargo test --features integration-tests\`"
+          } >> "$GITHUB_STEP_SUMMARY"
