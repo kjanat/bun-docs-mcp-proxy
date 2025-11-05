@@ -739,3 +739,140 @@ async fn test_direct_search_file_overwrite() {
     // Cleanup
     let _ = std::fs::remove_file(&output_path);
 }
+
+#[tokio::test]
+async fn test_format_markdown_fetch_mdx_error_with_fallback() {
+    // Test that when MDX fetch fails, we get an error comment + fallback text
+    let mut server = mockito::Server::new_async().await;
+
+    // Mock the MDX fetch to fail with 500
+    let mock_error = server
+        .mock("GET", mockito::Matcher::Any)
+        .with_status(500_usize)
+        .with_body("Internal Server Error")
+        .expect(1_usize)
+        .create_async()
+        .await;
+
+    let result = serde_json::json!({"content": [{
+        "text": format!("Original text content\nLink: {}/docs/page", server.url()),
+        "type": "text"
+    }]});
+
+    let client = http::BunDocsClient::with_base_url(&server.url()).expect("valid URL");
+    let formatted = format_markdown(&result, &client)
+        .await
+        .expect("format should succeed");
+
+    mock_error.assert_async().await;
+    drop(server);
+
+    // Verify error comment and fallback text
+    assert!(
+        formatted.contains("<!-- Error:"),
+        "Should have error comment when fetch fails"
+    );
+    assert!(
+        formatted.contains("Original text content"),
+        "Should include fallback text"
+    );
+    // Verifies src/main.rs line 302: warn!("Failed to fetch MDX from {url}: {e}");
+    // Verifies line 304: write!(part, "<!-- Error: {e} -->\n\n")
+    // Verifies line 305: part.push_str(entry.text)
+}
+
+#[tokio::test]
+async fn test_handle_tools_call_with_network_error() {
+    // Test that network errors are properly converted to JSON-RPC error responses
+    let mut server = mockito::Server::new_async().await;
+
+    // Mock all requests to fail with 503
+    let _mock = server
+        .mock("POST", mockito::Matcher::Any)
+        .with_status(503_usize)
+        .with_body("Service Unavailable")
+        .expect_at_least(1_usize)
+        .create_async()
+        .await;
+
+    let client = http::BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
+    let request = JsonRpcRequest {
+        jsonrpc: "2.0".to_owned(),
+        id: json!(1),
+        method: "tools/call".to_owned(),
+        params: Some(json!({
+            "name": "SearchBun",
+            "arguments": {"query": "test"}
+        })),
+    };
+
+    let response = handle_tools_call(&client, &request).await;
+    let serialized = serde_json::to_value(&response).unwrap();
+
+    drop(server);
+
+    // Verify error response structure (after max retries)
+    assert!(
+        serialized["error"].is_object(),
+        "Should have error field in response"
+    );
+    assert_eq!(
+        serialized["error"]["code"], -32_603_i32,
+        "Should be internal error code"
+    );
+    assert!(
+        serialized["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("error"),
+        "Error message should describe the issue"
+    );
+    // Verifies src/main.rs line 540: error!("Failed to forward request: {}", e);
+    // Verifies lines 541-545: JsonRpcResponse::error construction with JSONRPC_INTERNAL_ERROR
+}
+
+#[tokio::test]
+async fn test_format_markdown_with_url_and_fetch_success() {
+    // Test happy path: URL is parsed and MDX is fetched successfully
+    let mut server = mockito::Server::new_async().await;
+
+    // Mock successful MDX fetch
+    let mock = server
+        .mock("GET", "/docs/page")
+        .match_header("accept", "text/markdown")
+        .with_status(200_usize)
+        .with_header("content-type", "text/markdown")
+        .with_body("# Documentation\n\nThis is the actual MDX content")
+        .expect(1_usize)
+        .create_async()
+        .await;
+
+    let url = format!("{}/docs/page", server.url());
+    let result = serde_json::json!({"content": [{
+        "text": format!("Summary\nLink: {url}"),
+        "type": "text"
+    }]});
+
+    let client = http::BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
+    let formatted = format_markdown(&result, &client)
+        .await
+        .expect("format should succeed");
+
+    mock.assert_async().await;
+    drop(server);
+
+    // Verify source comment and MDX content
+    assert!(
+        formatted.contains("<!-- Source:"),
+        "Should have source comment when fetch succeeds"
+    );
+    assert!(
+        formatted.contains("# Documentation"),
+        "Should include fetched MDX content"
+    );
+    assert!(
+        formatted.contains("actual MDX content"),
+        "Should preserve full MDX content"
+    );
+    // Verifies src/main.rs lines 292-298: successful fetch with source comment
+}

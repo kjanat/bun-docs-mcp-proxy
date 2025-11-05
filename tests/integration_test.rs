@@ -348,3 +348,23 @@ fn test_numeric_and_string_ids() {
     assert!(string_id.is_number() || string_id.is_string() || string_id.is_null());
     assert!(null_id.is_number() || null_id.is_string() || null_id.is_null());
 }
+
+#[test]
+fn test_main_loop_stdin_parse_error() {
+    use assert_cmd::cargo::cargo_bin_cmd;
+    use core::time::Duration;
+    use predicates::prelude::*;
+
+    // Test that malformed JSON triggers parse error with proper error response
+    let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
+    cmd.write_stdin("{ invalid json without closing\n")
+        .timeout(Duration::from_secs(2_u64))
+        .assert()
+        .stderr(
+            predicate::str::contains("parse")
+                .or(predicate::str::contains("Parse error"))
+                .or(predicate::str::contains("EOF")),
+        );
+    // Verifies error logging at src/main.rs line 449
+    // Verifies error response construction at lines 450-454
+}

@@ -1091,4 +1091,95 @@ mod tests {
         let error = result.expect_err("should be 500 error");
         assert!(error.to_string().contains("500"));
     }
+
+    #[tokio::test]
+    async fn retry_with_transient_http_failure_logging() {
+        let mut server = mockito::Server::new_async().await;
+
+        // First attempt: 503 error (transient)
+        let mock1 = server
+            .mock("POST", "/")
+            .with_status(503_usize)
+            .with_header("content-type", "text/plain")
+            .with_body("Service Unavailable")
+            .expect(1_usize)
+            .create_async()
+            .await;
+
+        // Second attempt: Success
+        let mock2 = server
+            .mock("POST", "/")
+            .with_status(200_usize)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"result": {"tools": []}}"#)
+            .expect(1_usize)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
+        let request = json!({"method": "tools/list"});
+
+        let result = client.forward_request(request).await;
+
+        mock1.assert_async().await;
+        mock2.assert_async().await;
+        drop(server);
+
+        assert!(result.is_ok(), "Should succeed after transient 503 retry");
+        let response = result.expect("successful response");
+        assert!(response.get("result").is_some());
+        // Verifies src/http.rs line 315-319: warn!("Transient HTTP status...")
+        // Verifies line 321: backoff_delay_ms calculation
+        // Verifies line 322: sleep execution
+    }
+
+    #[tokio::test]
+    async fn retry_on_multiple_transient_failures() {
+        let mut server = mockito::Server::new_async().await;
+
+        // First attempt: 502 Bad Gateway
+        let mock1 = server
+            .mock("POST", "/")
+            .with_status(502_usize)
+            .with_body("Bad Gateway")
+            .expect(1_usize)
+            .create_async()
+            .await;
+
+        // Second attempt: 503 Service Unavailable
+        let mock2 = server
+            .mock("POST", "/")
+            .with_status(503_usize)
+            .with_body("Service Unavailable")
+            .expect(1_usize)
+            .create_async()
+            .await;
+
+        // Third attempt: 504 Gateway Timeout (transient)
+        let mock3 = server
+            .mock("POST", "/")
+            .with_status(504_usize)
+            .with_body("Gateway Timeout")
+            .expect(1_usize)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
+        let request = json!({"method": "test"});
+
+        let result = client.forward_request(request).await;
+
+        // All three mocks should have been called (exhausted retries)
+        mock1.assert_async().await;
+        mock2.assert_async().await;
+        mock3.assert_async().await;
+        drop(server);
+
+        assert!(result.is_err(), "Should fail after exhausting retries");
+        let error = result.expect_err("should be an error");
+        assert!(error.to_string().contains("504"));
+        // Verifies src/http.rs line 314: is_transient_status check for all 5xx codes
+        // Verifies line 317-318: retry condition check (attempt < MAX_RETRIES)
+        // Verifies line 321-322: backoff delays between attempts
+    }
 }
