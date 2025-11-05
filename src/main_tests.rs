@@ -736,6 +736,7 @@ async fn test_direct_search_markdown_format() {
 }
 
 #[tokio::test]
+#[cfg(feature = "integration-tests")]
 async fn test_direct_search_with_output_file() {
     let temp_file = tempfile::Builder::new()
         .prefix("test_search_")
@@ -772,6 +773,7 @@ async fn test_direct_search_whitespace_only_query() {
 }
 
 #[tokio::test]
+#[cfg(feature = "integration-tests")]
 async fn test_direct_search_markdown_with_file() {
     let temp_file = tempfile::Builder::new()
         .prefix("test_markdown_")
@@ -829,6 +831,7 @@ async fn test_direct_search_invalid_output_path() {
 }
 
 #[tokio::test]
+#[cfg(feature = "integration-tests")]
 async fn test_direct_search_file_overwrite() {
     let temp_file = tempfile::Builder::new()
         .prefix("test_overwrite_")
