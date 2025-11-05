@@ -380,9 +380,8 @@ impl BunDocsClient {
 
         loop {
             let event_result = event_stream.next().await;
-            let event_result = match event_result {
-                Some(r) => r,
-                None => break,
+            let Some(event_result) = event_result else {
+                break;
             };
             match event_result {
                 Ok(event) => {
