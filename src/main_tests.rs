@@ -737,17 +737,21 @@ async fn test_direct_search_markdown_format() {
 
 #[tokio::test]
 async fn test_direct_search_with_output_file() {
-    let temp_file = tempfile::NamedTempFile::new().unwrap();
-    let output_str = temp_file.path().to_str().unwrap();
+    let temp_file = tempfile::Builder::new()
+        .prefix("test_search_")
+        .suffix(".json")
+        .tempfile_in(".")
+        .unwrap();
+    let output_path = temp_file.path().file_name().unwrap().to_str().unwrap();
 
-    let result = direct_search("test", &OutputFormat::Json, Some(output_str)).await;
+    let result = direct_search("test", &OutputFormat::Json, Some(output_path)).await;
     result.unwrap();
 
     // Verify file was created
-    assert!(temp_file.path().exists());
+    assert!(std::path::Path::new(output_path).exists());
 
     // Read and verify content
-    let content = std::fs::read_to_string(temp_file.path()).unwrap();
+    let content = std::fs::read_to_string(output_path).unwrap();
     assert!(!content.is_empty());
 
     // tempfile automatically cleans up on drop
@@ -762,17 +766,21 @@ async fn test_direct_search_empty_query() {
 
 #[tokio::test]
 async fn test_direct_search_markdown_with_file() {
-    let temp_file = tempfile::NamedTempFile::new().unwrap();
-    let output_str = temp_file.path().to_str().unwrap();
+    let temp_file = tempfile::Builder::new()
+        .prefix("test_markdown_")
+        .suffix(".md")
+        .tempfile_in(".")
+        .unwrap();
+    let output_path = temp_file.path().file_name().unwrap().to_str().unwrap();
 
-    let result = direct_search("Bun", &OutputFormat::Markdown, Some(output_str)).await;
+    let result = direct_search("Bun", &OutputFormat::Markdown, Some(output_path)).await;
     result.unwrap();
 
     // Verify file was created
-    assert!(temp_file.path().exists());
+    assert!(std::path::Path::new(output_path).exists());
 
     // Read and verify markdown content (may include URL comments or MDX)
-    let content = std::fs::read_to_string(temp_file.path()).unwrap();
+    let content = std::fs::read_to_string(output_path).unwrap();
     assert!(!content.is_empty(), "Markdown output should not be empty");
     // The content could be raw MDX with URL comments or fallback text
 
@@ -781,7 +789,6 @@ async fn test_direct_search_markdown_with_file() {
 
 #[test]
 fn test_validate_output_path_valid() {
-    validate_output_path("/tmp/output.json").unwrap();
     validate_output_path("output.json").unwrap();
     validate_output_path("./output.json").unwrap();
     validate_output_path("subdir/output.json").unwrap();
@@ -792,6 +799,14 @@ fn test_validate_output_path_directory_traversal() {
     assert!(validate_output_path("../output.json").is_err());
     assert!(validate_output_path("subdir/../output.json").is_err());
     assert!(validate_output_path("../../etc/passwd").is_err());
+}
+
+#[test]
+fn test_validate_output_path_absolute_paths() {
+    assert!(validate_output_path("/tmp/output.json").is_err());
+    assert!(validate_output_path("/etc/passwd").is_err());
+    #[cfg(windows)]
+    assert!(validate_output_path("C:\\output.json").is_err());
 }
 
 #[tokio::test]
@@ -808,19 +823,23 @@ async fn test_direct_search_invalid_output_path() {
 
 #[tokio::test]
 async fn test_direct_search_file_overwrite() {
-    let temp_file = tempfile::NamedTempFile::new().unwrap();
-    let output_str = temp_file.path().to_str().unwrap();
+    let temp_file = tempfile::Builder::new()
+        .prefix("test_overwrite_")
+        .suffix(".json")
+        .tempfile_in(".")
+        .unwrap();
+    let output_path = temp_file.path().file_name().unwrap().to_str().unwrap();
 
     // Create existing file
-    fs::write(temp_file.path(), "existing content").unwrap();
-    assert!(temp_file.path().exists());
+    fs::write(output_path, "existing content").unwrap();
+    assert!(std::path::Path::new(output_path).exists());
 
-    // Should overwrite with warning
-    let result = direct_search("test", &OutputFormat::Json, Some(output_str)).await;
+    // Should overwrite
+    let result = direct_search("test", &OutputFormat::Json, Some(output_path)).await;
     result.unwrap();
 
     // Verify new content
-    let content = std::fs::read_to_string(temp_file.path()).unwrap();
+    let content = std::fs::read_to_string(output_path).unwrap();
     assert!(!content.contains("existing content"));
 
     // tempfile automatically cleans up on drop

@@ -77,11 +77,6 @@ tasks:
     aliases: [tu]
     cmd: cargo test --bins {{.CLI_ARGS}}
 
-  test-unit-only:
-    desc: Run only mocked unit tests (excludes integration tests)
-    aliases: [tuo]
-    cmd: cargo test {{.CLI_ARGS}}
-
   test-integration-only:
     desc: Run integration tests with real API calls (requires network)
     aliases: [tio]

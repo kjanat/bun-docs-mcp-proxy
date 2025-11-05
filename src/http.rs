@@ -238,17 +238,12 @@ impl BunDocsClient {
         clippy::too_many_lines,
         reason = "complex retry logic with error handling"
     )]
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_possible_wrap,
-        reason = "MAX_RETRIES=3 fits safely in i32, loop variable type chosen for consistency"
-    )]
     pub async fn forward_request(&self, request: Value) -> Result<Value> {
         debug!("Forwarding request to Bun Docs API");
 
         let mut last_error: Option<anyhow::Error> = None;
 
-        for attempt in 1_i32..=MAX_RETRIES as i32 {
+        for attempt in 1_usize..=MAX_RETRIES {
             // Build request each attempt
             let rb = self
                 .client
@@ -311,14 +306,13 @@ impl BunDocsClient {
                     );
 
                     // Retry on transient server statuses
-                    if Self::is_transient_status(status) && attempt < MAX_RETRIES as i32 {
+                    if Self::is_transient_status(status) && attempt < MAX_RETRIES {
                         warn!(
                             "Transient HTTP status {}, retrying (attempt {})",
                             status,
-                            attempt + 1_i32
+                            attempt + 1
                         );
-                        #[expect(clippy::cast_sign_loss, reason = "attempt is always positive")]
-                        let delay = Self::backoff_delay_ms(attempt as usize);
+                        let delay = Self::backoff_delay_ms(attempt);
                         tokio::time::sleep(Duration::from_millis(delay)).await;
                         last_error = Some(error);
                         continue;
@@ -332,15 +326,14 @@ impl BunDocsClient {
                         error.is_connect() || error.is_timeout() || error.is_request();
                     let err = anyhow::anyhow!("Failed to send request to Bun Docs API: {error}");
 
-                    if is_transient && attempt < MAX_RETRIES as i32 {
+                    if is_transient && attempt < MAX_RETRIES {
                         warn!(
                             "Network error: {}. Retrying (attempt {} of {})",
                             err,
-                            attempt + 1_i32,
+                            attempt + 1,
                             MAX_RETRIES
                         );
-                        #[expect(clippy::cast_sign_loss, reason = "attempt is always positive")]
-                        let delay = Self::backoff_delay_ms(attempt as usize);
+                        let delay = Self::backoff_delay_ms(attempt);
                         tokio::time::sleep(Duration::from_millis(delay)).await;
                         last_error = Some(err);
                         continue;

@@ -329,6 +329,11 @@ async fn format_markdown(
 fn validate_output_path(path: &str) -> Result<(), String> {
     let path_obj = std::path::Path::new(path);
 
+    // Reject absolute paths
+    if path_obj.is_absolute() {
+        return Err("Output path must be relative".to_owned());
+    }
+
     // Check for directory traversal attempts
     for component in path_obj.components() {
         if matches!(component, std::path::Component::ParentDir) {

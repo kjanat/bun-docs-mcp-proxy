@@ -46,7 +46,7 @@ jobs:
       - name: Run integration tests with real API
         run: |
           echo "::group::Running integration tests against bun.com/docs/mcp"
-          cargo test --features integration-tests --all-targets
+          cargo test --features integration-tests --all-targets -- --include-ignored
           echo "::endgroup::"
         # Continue even if some tests fail (network issues, API changes, etc)
         continue-on-error: true
@@ -54,14 +54,14 @@ jobs:
       - name: Run integration tests with nextest
         run: |
           echo "::group::Running integration tests with nextest"
-          cargo nextest run --features integration-tests --all-targets --profile ci
+          cargo nextest run --features integration-tests --all-targets --profile ci --run-ignored all
           echo "::endgroup::"
         continue-on-error: true
 
       - name: Generate coverage for integration tests
         run: |
           echo "::group::Generating coverage for integration tests"
-          cargo llvm-cov --features integration-tests --codecov --output-path integration-coverage.json
+          cargo llvm-cov --features integration-tests --codecov --output-path integration-coverage.json -- --include-ignored
           echo "::endgroup::"
         continue-on-error: true
 
