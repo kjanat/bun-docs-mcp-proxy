@@ -10,7 +10,6 @@ use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::fs;
 use std::path::Path;
-use tempfile::tempdir;
 
 /// Test basic search functionality in CLI mode
 #[test]
