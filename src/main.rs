@@ -33,7 +33,7 @@ use clap::{Parser, ValueEnum};
 use core::fmt::Write as _;
 use protocol::{JsonRpcRequest, JsonRpcResponse};
 use std::fs;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 /// Standard JSON-RPC 2.0 error code for parse errors (invalid JSON).
@@ -299,11 +299,11 @@ async fn format_markdown(
                 }
                 Err(e) => {
                     // Error: include error comment and fallback to original text
+                    warn!("Failed to fetch MDX from {url}: {e}");
                     let mut part = String::new();
                     write!(part, "<!-- Error: {e} -->\n\n").unwrap();
                     part.push_str(entry.text);
                     mdx_parts.push(part);
-                    eprintln!("Failed to fetch MDX from {url}: {e}");
                 }
             }
         } else {
@@ -361,11 +361,6 @@ async fn direct_search(
     // Validate output path if provided
     if let Some(path) = output_path {
         validate_output_path(path).map_err(|e| anyhow::anyhow!("Invalid output path: {e}"))?;
-
-        // Warn if file already exists
-        if std::path::Path::new(path).exists() {
-            eprintln!("Warning: File '{path}' already exists and will be overwritten");
-        }
     }
 
     // Build search request

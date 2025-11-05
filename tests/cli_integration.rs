@@ -114,10 +114,9 @@ fn cli_search_file_overwrite_warning() {
     let mut cmd = cargo_bin_cmd!("bun-docs-mcp-proxy");
     cmd.args(["--search", "test", "--output", output_str])
         .assert()
-        .success()
-        .stderr(predicate::str::contains("Warning").and(predicate::str::contains("overwritten")));
+        .success();
 
-    // Verify content was overwritten
+    // Verify content was overwritten (no warning shown)
     let content = fs::read_to_string(&output_path).expect("file read succeeds");
     assert!(!content.contains("existing content"));
 }
