@@ -146,13 +146,13 @@ jobs:
 
       - name: Generate attestation (Linux/macOS)
         if: runner.os != 'Windows'
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v3
         with:
           subject-path: "target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.tar.gz"
 
       - name: Generate attestation (Windows)
         if: runner.os == 'Windows'
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v3
         with:
           subject-path: "target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip"
 
