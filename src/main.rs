@@ -465,9 +465,18 @@ async fn main() -> Result<()> {
                     JSONRPC_PARSE_ERROR,
                     format!("Parse error: {e}"),
                 );
-                if let Ok(response_str) = serde_json::to_string(&error_response) {
-                    let write_result = transport.write_message(&response_str).await;
-                    let _ = write_result;
+                let serialize_result = serde_json::to_string(&error_response);
+                match serialize_result {
+                    Ok(response_str) => {
+                        let write_result = transport.write_message(&response_str).await;
+                        if let Err(write_err) = write_result {
+                            error!("Failed to write parse error response: {}", write_err);
+                            break;
+                        }
+                    }
+                    Err(ser_err) => {
+                        error!("Failed to serialize parse error response: {}", ser_err);
+                    }
                 }
                 continue;
             }
