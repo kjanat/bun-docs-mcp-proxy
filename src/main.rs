@@ -27,12 +27,15 @@
 mod http;
 mod protocol;
 mod transport;
+pub mod utils;
 
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use core::fmt::Write as _;
 use protocol::{JsonRpcRequest, JsonRpcResponse};
 use std::fs;
+use std::time::Duration;
+use tokio::signal;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -44,6 +47,11 @@ const JSONRPC_INVALID_PARAMS: i32 = -32602;
 const JSONRPC_INTERNAL_ERROR: i32 = -32603;
 /// Standard JSON-RPC 2.0 error code for method not found errors.
 const JSONRPC_METHOD_NOT_FOUND: i32 = -32601;
+
+/// Maximum consecutive read errors before applying backoff delay
+const MAX_CONSECUTIVE_READ_ERRORS: usize = 5_usize;
+/// Backoff delay (in milliseconds) when max consecutive read errors reached
+const READ_ERROR_BACKOFF_MS: u64 = 100_u64;
 
 /// Output format for CLI search results
 #[derive(Debug, Clone, ValueEnum)]
@@ -134,18 +142,11 @@ fn get_string_param<'value>(
 /// # Returns
 /// A `Result` which on success contains the extracted search query as a `String`.
 /// On failure, it returns a `String` describing the invalid URI format.
-#[allow(
-    clippy::option_if_let_else,
-    reason = "clearer with explicit if-let-else pattern"
-)]
 fn parse_bun_docs_uri(uri: &str) -> Result<String, String> {
-    if let Some(query_part) = uri.strip_prefix("bun://docs?query=") {
-        Ok(query_part.to_owned())
-    } else if uri == "bun://docs" {
-        Ok(String::new())
-    } else {
-        Err(format!("Invalid URI format: {uri}"))
-    }
+    uri.strip_prefix("bun://docs?query=")
+        .map(ToOwned::to_owned)
+        .or_else(|| (uri == "bun://docs").then(String::new))
+        .ok_or_else(|| format!("Invalid URI format: {uri}"))
 }
 
 /// Initializes the `tracing` subscriber for logging.
@@ -440,85 +441,177 @@ async fn main() -> Result<()> {
     let mut transport = transport::StdioTransport::new();
     let http_client = http::BunDocsClient::new();
 
+    run_server_loop(&mut transport, &http_client).await
+}
+
+/// Runs the main MCP server loop with graceful shutdown support.
+///
+/// This function handles:
+/// - Reading JSON-RPC requests from stdin
+/// - Processing requests and sending responses
+/// - Graceful shutdown on SIGTERM/SIGINT (Unix) or Ctrl+C (all platforms)
+/// - Rate limiting on repeated read errors to prevent tight error loops
+///
+/// # Arguments
+/// * `transport` - Mutable reference to the stdio transport
+/// * `http_client` - Reference to the HTTP client for API calls
+///
+/// # Returns
+/// `Ok(())` on graceful shutdown, or an error if a fatal condition occurs
+async fn run_server_loop(
+    transport: &mut transport::StdioTransport,
+    http_client: &http::BunDocsClient,
+) -> Result<()> {
+    let mut consecutive_read_errors = 0_usize;
+
     loop {
-        // Read JSON-RPC request from stdin
-        let read_result = transport.read_message().await;
-        let message = match read_result {
-            Ok(Some(msg)) => msg,
-            Ok(None) => {
-                info!("Connection closed");
+        // Check for shutdown signal using tokio::select!
+        tokio::select! {
+            biased;
+
+            // Handle shutdown signals
+            () = shutdown_signal() => {
+                info!("Received shutdown signal");
                 break;
             }
-            Err(e) => {
-                error!("Failed to read message: {}", e);
-                continue;
-            }
-        };
 
-        // Parse JSON-RPC request
-        let request: JsonRpcRequest = match serde_json::from_str(&message) {
-            Ok(req) => req,
-            Err(e) => {
-                error!("Failed to parse JSON-RPC request: {}", e);
-                let error_response = JsonRpcResponse::error(
-                    serde_json::Value::Null,
-                    JSONRPC_PARSE_ERROR,
-                    format!("Parse error: {e}"),
-                );
-                let serialize_result = serde_json::to_string(&error_response);
-                match serialize_result {
-                    Ok(response_str) => {
-                        let write_result = transport.write_message(&response_str).await;
-                        if let Err(write_err) = write_result {
-                            error!("Failed to write parse error response: {}", write_err);
-                            break;
+            // Read and process messages
+            read_result = transport.read_message() => {
+                let message = match read_result {
+                    Ok(Some(msg)) => {
+                        consecutive_read_errors = 0_usize;
+                        msg
+                    }
+                    Ok(None) => {
+                        info!("Connection closed");
+                        break;
+                    }
+                    Err(e) => {
+                        consecutive_read_errors += 1_usize;
+                        error!(
+                            "Failed to read message (error {} of {}): {}",
+                            consecutive_read_errors, MAX_CONSECUTIVE_READ_ERRORS, e
+                        );
+
+                        // Apply backoff if too many consecutive errors
+                        if consecutive_read_errors >= MAX_CONSECUTIVE_READ_ERRORS {
+                            warn!(
+                                "Too many consecutive read errors, applying {}ms backoff",
+                                READ_ERROR_BACKOFF_MS
+                            );
+                            tokio::time::sleep(Duration::from_millis(READ_ERROR_BACKOFF_MS)).await;
                         }
+                        continue;
                     }
-                    Err(ser_err) => {
-                        error!("Failed to serialize parse error response: {}", ser_err);
-                    }
-                }
-                continue;
-            }
-        };
+                };
 
-        info!("Received method: {}", request.method);
-
-        // Handle request based on method
-        let response = match request.method.as_str() {
-            "tools/call" => handle_tools_call(&http_client, &request).await,
-            "tools/list" => handle_tools_list(&request),
-            "resources/list" => handle_resources_list(&request),
-            "resources/read" => handle_resources_read(&http_client, &request).await,
-            "initialize" => handle_initialize(&request),
-            method => {
-                error!("Unsupported method: {}", method);
-                JsonRpcResponse::error(
-                    request.id,
-                    JSONRPC_METHOD_NOT_FOUND,
-                    format!("Method not found: {method}"),
-                )
-            }
-        };
-
-        // Send response back to stdout
-        let serialize_result = serde_json::to_string(&response);
-        match serialize_result {
-            Ok(response_str) => {
-                let write_result = transport.write_message(&response_str).await;
-                if let Err(e) = write_result {
-                    error!("Failed to write response: {}", e);
+                // Process the message
+                if let Err(e) = process_message(transport, http_client, &message).await {
+                    error!("Fatal error processing message: {}", e);
                     break;
                 }
-            }
-            Err(e) => {
-                error!("Failed to serialize response: {}", e);
             }
         }
     }
 
     info!("Bun Docs MCP Proxy shutting down");
     Ok(())
+}
+
+/// Waits for a shutdown signal (SIGTERM, SIGINT on Unix; Ctrl+C on all platforms).
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut sigterm =
+            signal::unix::signal(signal::unix::SignalKind::terminate()).expect("SIGTERM handler");
+        let mut sigint =
+            signal::unix::signal(signal::unix::SignalKind::interrupt()).expect("SIGINT handler");
+
+        tokio::select! {
+            _ = sigterm.recv() => {}
+            _ = sigint.recv() => {}
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        signal::ctrl_c().await.expect("Ctrl+C handler");
+    }
+}
+
+/// Processes a single JSON-RPC message.
+///
+/// # Arguments
+/// * `transport` - Mutable reference to the stdio transport for sending responses
+/// * `http_client` - Reference to the HTTP client for API calls
+/// * `message` - The raw JSON-RPC message string
+///
+/// # Returns
+/// `Ok(())` on success, `Err` if a fatal write error occurs
+async fn process_message(
+    transport: &mut transport::StdioTransport,
+    http_client: &http::BunDocsClient,
+    message: &str,
+) -> Result<()> {
+    // Parse JSON-RPC request
+    let request: JsonRpcRequest = match serde_json::from_str(message) {
+        Ok(req) => req,
+        Err(e) => {
+            error!("Failed to parse JSON-RPC request: {}", e);
+            let error_response = JsonRpcResponse::error(
+                serde_json::Value::Null,
+                JSONRPC_PARSE_ERROR,
+                format!("Parse error: {e}"),
+            );
+            return send_response(transport, &error_response).await;
+        }
+    };
+
+    info!("Received method: {}", request.method);
+
+    // Handle request based on method
+    let response = match request.method.as_str() {
+        "tools/call" => handle_tools_call(http_client, &request).await,
+        "tools/list" => handle_tools_list(&request),
+        "resources/list" => handle_resources_list(&request),
+        "resources/read" => handle_resources_read(http_client, &request).await,
+        "initialize" => handle_initialize(&request),
+        method => {
+            error!("Unsupported method: {}", method);
+            JsonRpcResponse::error(
+                request.id,
+                JSONRPC_METHOD_NOT_FOUND,
+                format!("Method not found: {method}"),
+            )
+        }
+    };
+
+    send_response(transport, &response).await
+}
+
+/// Sends a JSON-RPC response via the transport.
+///
+/// # Arguments
+/// * `transport` - Mutable reference to the stdio transport
+/// * `response` - The response to serialize and send
+///
+/// # Returns
+/// `Ok(())` on success, `Err` if serialization or write fails fatally
+async fn send_response(
+    transport: &mut transport::StdioTransport,
+    response: &JsonRpcResponse,
+) -> Result<()> {
+    match serde_json::to_string(response) {
+        Ok(response_str) => transport
+            .write_message(&response_str)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to write response: {e}")),
+        Err(e) => {
+            error!("Failed to serialize response: {}", e);
+            // Serialization failure is not fatal to the loop
+            Ok(())
+        }
+    }
 }
 
 /// Handles a `tools/call` JSON-RPC request by forwarding it to the Bun Docs API.
@@ -550,16 +643,12 @@ async fn handle_tools_call(
             info!("Successfully got response from Bun Docs");
 
             // Based on protocol analysis, the SSE data contains
-            // the complete JSON-RPC response. Extract the result field.
-            #[allow(
-                clippy::option_if_let_else,
-                reason = "clearer with explicit pattern match"
-            )]
-            if let Some(result_field) = result.get("result") {
-                JsonRpcResponse::success(request.id.clone(), result_field.clone())
-            } else {
-                JsonRpcResponse::success(request.id.clone(), result)
-            }
+            // the complete JSON-RPC response. Extract the result field if present.
+            let response_value = result
+                .get("result")
+                .cloned()
+                .unwrap_or_else(|| result.clone());
+            JsonRpcResponse::success(request.id.clone(), response_value)
         }
         Err(e) => {
             error!("Failed to forward request: {}", e);
