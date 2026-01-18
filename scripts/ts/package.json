@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "fetch-docs": "bun scripts/fetch-docs.ts",
+    "fetch-docs": "bun fetch-docs.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

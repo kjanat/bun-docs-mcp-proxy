@@ -19,7 +19,7 @@ Please **do not** create a public GitHub issue for security vulnerabilities. Thi
 
 ### 2. Report Privately
 
-Send details to: **info@kajkowalski.nl**
+Send details to: [info@kajkowalski.nl]
 
 Include in your report:
 
@@ -108,6 +108,10 @@ _No security issues reported yet._
 For general security questions (not vulnerability reports):
 
 - **GitHub Discussions** - https://github.com/kjanat/bun-docs-mcp-proxy/discussions
-- **Email** - info@kajkowalski.nl
+- **Email** - [info@kajkowalski.nl]
 
 Thank you for helping keep bun-docs-mcp-proxy secure!
+
+[info@kajkowalski.nl]: mailto:info@kajkowalski.nl
+
+<!--markdownlint-disable-file MD034-->

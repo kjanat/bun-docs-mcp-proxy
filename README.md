@@ -14,12 +14,12 @@ Works as both an MCP server (stdio mode) and standalone CLI tool (search mode).
 
 ## Features
 
-- **Tiny & Fast** — 2.7 MB binary, 4ms startup, ~2-5 MB memory
-- **Zero Dependencies** — Single native binary, no runtime required
-- **Dual Mode** — MCP server for editors + CLI for terminal searches
-- **Rich Output** — JSON, Markdown (raw MDX), or plain text formats
-- **Production Ready** — ~86% test coverage, comprehensive error handling
-- **Cross-Platform** — Linux, macOS, Windows (x86_64 + ARM64)
+- **Tiny & Fast** - 2.7 MB binary, 4ms startup, ~2-5 MB memory
+- **Zero Dependencies** - Single native binary, no runtime required
+- **Dual Mode** - MCP server for editors + CLI for terminal searches
+- **Rich Output** - JSON, Markdown (raw MDX), or plain text formats
+- **Production Ready** - ~86% test coverage, comprehensive error handling
+- **Cross-Platform** - Linux, macOS, Windows (x86_64 + ARM64)
 
 ## Quick Start
 
@@ -42,7 +42,7 @@ curl -L https://github.com/kjanat/bun-docs-mcp-proxy/releases/latest/download/bu
 
 ```bash
 cargo install --git https://github.com/kjanat/bun-docs-mcp-proxy
-# or: task br
+# or: just br
 ```
 
 ### CLI Search Mode
@@ -62,9 +62,9 @@ bun-docs-mcp-proxy -s "test" -f text
 
 **Output formats:**
 
-- `json` — Structured data (default)
-- `markdown` — Raw MDX documentation sources
-- `text` — Plain text extraction
+- `json` - Structured data (default)
+- `markdown` - Raw MDX documentation sources
+- `text` - Plain text extraction
 
 ### MCP Server Mode
 
@@ -89,37 +89,29 @@ Install [bun-docs-mcp-zed][zed-extension] extension (auto-downloads proxy)
 
 **Available MCP methods:**
 
-- `tools/call` with `SearchBun` — Search documentation
-- `resources/read` with `bun://docs?query=...` — Read by URI
-- `tools/list`, `resources/list`, `initialize` — Standard MCP
+- `tools/call` with `SearchBun` - Search documentation
+- `resources/read` with `bun://docs?query=...` - Read by URI
+- `tools/list`, `resources/list`, `initialize` - Standard MCP
 
-## Documentation
-
-- **[INDEX.md](INDEX.md)** — Complete project navigation and reference
-- **[CONTRIBUTING.md](.github/CONTRIBUTING.md)** — Development setup and workflow
-- **[TESTING.md](.github/TESTING.md)** — Testing strategy and commands
-- **[CHANGELOG.md](CHANGELOG.md)** — Version history and releases
-- **[SECURITY.md](.github/SECURITY.md)** — Security policy
-
-### Quick Reference
+## Quick Reference
 
 ```bash
 # Development
-task c          # Run all checks (fmt + clippy + tests)
-task dev        # Watch mode (auto-rebuild)
-task ci         # Run CI checks locally
+just c          # Run all checks (fmt + clippy + tests)
+just dev        # Watch mode (auto-rebuild)
+just ci         # Run CI checks locally
 
 # Testing
-task t          # Unit tests
-task tio        # Integration tests
-task cov        # Coverage report
+just t          # Unit tests
+just tio        # Integration tests
+just cov        # Coverage report
 
 # Build
-task br         # Release build
-task build-all  # All platforms
+just br         # Release build
+just build-all-cross  # All platforms
 ```
 
-See [INDEX.md](INDEX.md) for comprehensive command reference, architecture details, and cross-platform builds.
+See [AGENTS.md](AGENTS.md) for architecture details and [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## Performance
 
