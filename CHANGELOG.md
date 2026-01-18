@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- dprint config for multi-language formatting (TS, JSON, MD, YAML, TOML, Rust)
+- tombi config for TOML formatting and linting
+- actup config for GitHub Actions version management
+- Zed editor settings with dprint integration
+- CODEOWNERS, issue/PR templates, and security policy
+
+### Changed
+
+- **Breaking**: Migrated from Taskfile to [just](https://just.systems) for task automation
+- Upgraded GitHub Actions: checkout@v6, setup-python@v6, setup-uv@v7, upload-artifact@v6
+- Moved TypeScript tooling to `scripts/ts/` subdirectory
+- Consolidated documentation into AGENTS.md (removed INDEX.md, CONTRIBUTING.md, IMPLEMENTATION_SUMMARY.md)
+- Refactored release workflow build matrix for clarity
+- Normalized em-dashes to hyphens in README
+- CI workflows skip on docs-only changes, Pages workflow triggers on docs changes
+
+### Fixed
+
+- Panic on stdout write failure now properly breaks event loop instead of tight-looping (fixes #8)
+- Fixed boolean type for `verbose` input in integration-tests workflow
+- Fixed markdown link syntax in SECURITY.md
+
 ## [0.3.0] - 2025-11-05
 
 ### Added
