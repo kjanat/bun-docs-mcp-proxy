@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Shared `utils` module with `truncate_utf8()` function to reduce code duplication
+- Graceful shutdown support with SIGTERM/SIGINT handling (Unix) and Ctrl+C (all platforms)
+- Configurable HTTP timeout via `BUN_DOCS_TIMEOUT_SECS` environment variable (default: 30s)
+- Rate limiting for consecutive read errors with backoff to prevent tight error loops
 - dprint config for multi-language formatting (TS, JSON, MD, YAML, TOML, Rust)
 - tombi config for TOML formatting and linting
 - actup config for GitHub Actions version management
@@ -23,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Breaking**: Migrated from Taskfile to [just](https://just.systems) for task automation
 - **Breaking**: Migrated from pre-commit to [lefthook](https://github.com/evilmartians/lefthook) for git hooks
+- Increased default HTTP timeout from 5s to 30s for better reliability on slow networks
+- Refactored main loop into `run_server_loop()` with `process_message()` and `send_response()` helpers
+- Replaced `option_if_let_else` patterns with functional combinators (`map_or_else`, `unwrap_or_else`)
 - Upgraded GitHub Actions: checkout@v6, setup-python@v6, setup-uv@v7, upload-artifact@v6
 - Moved TypeScript tooling to `scripts/ts/` subdirectory
 - Consolidated documentation into AGENTS.md (removed INDEX.md, CONTRIBUTING.md, IMPLEMENTATION_SUMMARY.md)
@@ -40,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - pre-commit configuration (replaced by lefthook)
+- Duplicate `truncate_utf8` implementations in http.rs and transport.rs
 
 ## [0.3.0] - 2025-11-05
 
