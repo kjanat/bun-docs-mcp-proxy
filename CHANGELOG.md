@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CODEOWNERS, issue/PR templates, and security policy
 - lefthook for git hooks with dprint integration
 - autofix.ci workflow for automatic formatting on PRs
+- CLAUDE.md to pull in AGENTS.md
 
 ### Changed
 
