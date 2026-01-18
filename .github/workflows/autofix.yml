@@ -29,14 +29,11 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Install tombi
-        uses: tombi-toml/setup-tombi@v1
-
-      - name: Install dprint
-        run: curl -fsSL https://dprint.dev/install.sh | sh
+      - name: Install formatters
+        run: npm install -g dprint tombi
 
       - name: Format all files
-        run: ~/.dprint/bin/dprint fmt --allow-no-files --excludes .github
+        run: dprint fmt --allow-no-files --excludes .github
         continue-on-error: true
 
       - name: Fix clippy warnings
