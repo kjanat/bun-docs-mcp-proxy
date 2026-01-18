@@ -1,0 +1,27 @@
+#:schema /home/kjanat/projects/actup/schemas/actup.schema.json
+#
+# actup configuration
+# See https://github.com/kjanat/actup for documentation
+
+# Version bump policy: major, minor, patch
+bump               = "major"
+# Pin mode: keep, tag, sha
+pin                = "keep"
+# Track mode: keep, major, exact
+track              = "major"
+# Whether to include risky (major version) updates
+apply-risky        = false
+# Output format: pretty, table, json, sarif
+format             = "pretty"
+# Output GitHub Actions annotations (for CI)
+github-annotations = false
+
+# Only check these actions (substring match, empty = all)
+# only = ["actions/"]
+
+[scan]
+# Glob patterns for workflow files
+patterns = [".github/workflows/*.yml", ".github/workflows/*.yaml"]
+# Actions to ignore (substring match)
+# These use semantic/tool tags (stable, nextest) not version tags
+ignore   = ["dtolnay/rust-toolchain", "taiki-e/install-action"]
