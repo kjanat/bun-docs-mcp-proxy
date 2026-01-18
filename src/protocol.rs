@@ -99,6 +99,8 @@ impl JsonRpcError {
 
     /// Create a new JSON-RPC error with additional data
     ///
+    /// Part of JSON-RPC 2.0 spec - available for future use when error details are needed.
+    ///
     /// # Arguments
     /// * `code` - Error code (standard JSON-RPC codes are negative)
     /// * `message` - Human-readable error message
@@ -107,7 +109,10 @@ impl JsonRpcError {
     /// # Returns
     /// New `JsonRpcError` instance with additional data
     #[must_use]
-    #[allow(dead_code, reason = "reserved for protocol compliance")]
+    #[allow(
+        dead_code,
+        reason = "JSON-RPC 2.0 spec compliance - available for future use"
+    )]
     pub const fn with_data(code: i32, message: String, data: Value) -> Self {
         Self {
             code,
@@ -157,6 +162,8 @@ impl JsonRpcResponse {
 
     /// Create an error response with additional data
     ///
+    /// Part of JSON-RPC 2.0 spec - available for future use when error details are needed.
+    ///
     /// # Arguments
     /// * `id` - Request identifier to match
     /// * `code` - Error code
@@ -166,7 +173,10 @@ impl JsonRpcResponse {
     /// # Returns
     /// New `JsonRpcResponse` with error field and additional data
     #[must_use]
-    #[allow(dead_code, reason = "reserved for protocol compliance")]
+    #[allow(
+        dead_code,
+        reason = "JSON-RPC 2.0 spec compliance - available for future use"
+    )]
     pub fn error_with_data(id: Value, code: i32, message: String, data: Value) -> Self {
         Self {
             jsonrpc: JSONRPC_VERSION.to_owned(),
