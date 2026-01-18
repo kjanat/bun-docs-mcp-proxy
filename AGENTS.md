@@ -1,226 +1,231 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for AI coding agents working in this Rust MCP proxy codebase.
 
 ## Project Overview
 
-Rust-based MCP (Model Context Protocol) proxy that bridges stdio-based MCP clients (like Zed) with the HTTP/SSE-based
-Bun documentation server at `https://bun.com/docs/mcp`. Acts as a protocol adapter: receives JSON-RPC 2.0 over stdin,
-forwards to Bun Docs HTTP API, parses SSE responses, and returns JSON-RPC over stdout.
+Rust MCP (Model Context Protocol) proxy bridging stdio-based clients (Zed) with
+Bun's HTTP/SSE docs API at `https://bun.com/docs/mcp`.\
+Receives JSON-RPC 2.0 on stdin, forwards to HTTP, parses SSE, returns
+JSON-RPC on stdout.
 
-## Essential Commands
-
-### Just-based Workflow (Recommended)
-
-This project uses [just](https://just.systems) for build automation with GitHub Actions integration.
+## Build Commands
 
 ```bash
-# Quick start - Common tasks
-just br          # Build release binary
-just t           # Run all tests
-just c           # Run all checks (fmt + clippy + tests)
-just cov         # Generate HTML coverage report
+# Build (recommended - uses just)
+just build           # Debug build with all features
+just br              # Release build (alias: just release)
 
-# CI simulation (matches GitHub Actions)
-just ci          # Run CI checks locally
-just ci-lint     # Run lint checks
-just ci-coverage # Run coverage workflow
-
-# Development
-just dev         # Watch mode (auto-rebuild on changes)
-just run         # Run proxy in debug mode
-
-# Version management (with safety prompts)
-just bump-patch  # Bump patch version (0.2.1 -> 0.2.2)
-just bump-minor  # Bump minor version (0.2.1 -> 0.3.0) [prompted]
-just bump-major  # Bump major version (0.2.1 -> 1.0.0) [prompted]
-
-# List all available recipes
-just --list
-```
-
-### Build & Test (Raw Commands)
-
-```bash
-# Build optimized release binary
+# Raw cargo
 cargo build --release
+cargo build --all-features --all-targets
+```
 
+## Test Commands
+
+```bash
 # Run all tests
-cargo test
+just t               # All unit tests (fast, no network)
+cargo test           # Same as above
 
-# Run tests with just
-just t
+# Run single test
+cargo test test_name                        # By name substring
+cargo test protocol::tests::deserialize     # By module path
+cargo test --test integration_test          # Single test file
 
-# Generate coverage report (uses cargo-llvm-cov)
-just cov
+# Test categories
+just tu              # Unit tests only (--bins)
+just ti              # Integration tests (shell script)
+just tio             # Integration with real API (--features integration-tests)
+just tn              # Nextest (faster, JUnit output)
 
-# Run with debug logging
-RUST_LOG=debug ./target/release/bun-docs-mcp-proxy
-
-# Manual test of tools/call
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"SearchBun","arguments":{"query":"Bun.serve"}}}' | \
-./target/release/bun-docs-mcp-proxy
-
-# Manual test of resources/read
-echo '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"bun://docs?query=Bun.serve"}}' | \
-./target/release/bun-docs-mcp-proxy
-
-# Manual test of resources/list
-echo '{"jsonrpc":"2.0","id":1,"method":"resources/list"}' | \
-./target/release/bun-docs-mcp-proxy
+# With output
+cargo test -- --nocapture                   # Show println! output
+cargo test -- --show-output                 # Show test output on failure
+RUST_LOG=debug cargo test                   # With tracing logs
 ```
 
-### CLI Search Mode
-
-The proxy can operate in CLI mode for direct documentation searches with various output formats:
+## Lint & Format
 
 ```bash
-# Search with default JSON output
-bun-docs-mcp-proxy --search "Bun.serve"
+just c               # Full check: fmt-check + clippy + tests
+just fc              # Format check only
+just lint            # Clippy with all features
+just lint-strict     # Clippy with all lint groups enabled
 
-# Save results as markdown (fetches raw MDX sources)
-bun-docs-mcp-proxy -s "HTTP server" -f markdown -o results.md
-
-# Export as JSON for processing
-bun-docs-mcp-proxy --search "WebSocket" --format json --output ws-docs.json
-
-# Plain text output
-bun-docs-mcp-proxy -s "test" -f text
+# Formatting (dprint is the primary formatter)
+dprint fmt           # Format all files (ts, json, md, yaml, toml, rs)
+dprint check         # Check formatting without changes
+cargo fmt            # Rust only (also called by dprint)
+cargo clippy --all-features --all-targets
 ```
 
-**Output Formats**:
+**dprint** (`.dprint.jsonc`) orchestrates formatting for all file types:
 
-- **JSON** (`--format json`): Structured data export, pretty-printed for readability
-- **Text** (`--format text`): Plain text extraction from search results
-- **Markdown** (`--format markdown`): **Fetches raw MDX source files** from documentation URLs
-  - Parses `Link:` fields from search results
-  - Makes HTTP GET requests with `Accept: text/markdown` header
-  - Aggregates multiple documents with `---` separators
-  - Includes `<!-- Source: URL -->` comments for traceability
-  - Falls back to original text if fetch fails (with `<!-- Error: ... -->` comment)
+- **Rust**: via `rustfmt` (exec plugin)
+- **TOML**: via `tombi` (exec plugin)
+- **TypeScript/JSON/Markdown/YAML/HTML/CSS**: native dprint plugins
 
-**Breaking Change (v0.3.0)**: The markdown format now fetches raw MDX sources instead of just formatting search result text. This provides access to the full documentation content including MDX components.
-
-### Cross-Platform Builds
+## Coverage
 
 ```bash
-# Linux ARM64
-cargo build --release --target aarch64-unknown-linux-gnu
-
-# macOS Intel
-cargo build --release --target x86_64-apple-darwin
-
-# macOS Apple Silicon
-cargo build --release --target aarch64-apple-darwin
-
-# Windows
-cargo build --release --target x86_64-pc-windows-msvc
+just cov             # Generate coverage (llvm-cov)
+just covh            # HTML report -> target/llvm-cov/html/
+just covt            # Terminal summary
 ```
 
-## Architecture
+## Code Style Guidelines
 
-**Request Flow**: stdin (JSON-RPC) -> Proxy -> HTTP POST -> bun.com/docs/mcp -> SSE stream -> parse -> stdout (JSON-RPC)
+### Imports
 
-**Module Breakdown**:
+Grouped by `rustfmt.toml` settings:
 
-- `src/main.rs` - Event loop: read stdin -> dispatch by method -> write stdout. Handles `initialize`, `tools/list`,
-  `tools/call`
-- `src/protocol/` - JSON-RPC 2.0 types (`JsonRpcRequest`, `JsonRpcResponse`, `JsonRpcError`) with success/error builders
-- `src/transport/` - `StdioTransport`: async line-based stdin reader + stdout writer with flush
-- `src/http/` - `BunDocsClient`: HTTP client with SSE parser. Extracts `result` field from SSE data events
+1. `std` crate
+2. External crates
+3. Crate-local modules
 
-**Key Implementation Details**:
+```rust
+use anyhow::{Context as _, Result}; // Std/external first
+use serde::{Deserialize, Serialize};
+use tracing::{debug, info, warn};
 
-- SSE parsing uses `eventsource-stream` to parse Server-Sent Events from Bun Docs API
-- JSON-RPC response is embedded in SSE data events as `{"result": {...}}` or `{"error": {...}}`
-- `handle_tools_call` forwards entire request structure to preserve params/arguments
-- Error codes: `-32700` (parse), `-32601` (method not found), `-32603` (internal/HTTP errors)
-- Logs to stderr (Zed captures for extension logs), responses to stdout
-- Uses `rustls-tls` (no OpenSSL dependency) for portable TLS
-
-## Performance & Optimization
-
-**Release Profile** (`Cargo.toml`):
-
-- `opt-level = "z"` - Size optimization (currently 2.7 MB binary)
-- `strip = true` - No debug symbols
-- `lto = true` - Link-time optimization
-- `panic = "abort"` - Smaller panic handler
-- `codegen-units = 1` - Better optimization at cost of compile time
-
-**Metrics**: 4ms startup, ~2-5 MB RSS, ~400ms request time (network-bound)
-
-## Testing
-
-**Test Coverage: X%** (X/X lines)
-
-### Test Suite (46 tests)
-
-**Unit Tests** (41 tests):
-
-- `src/protocol/mod.rs` - JSON-RPC serialization/deserialization
-- `src/http/mod.rs` - HTTP client, SSE parsing, mocked API tests
-- `src/transport/mod.rs` - Stdio transport logic
-- `src/main.rs` - Handler functions, error paths
-
-**Integration Tests** (5 tests):
-
-- `tests/integration_test.rs` - Protocol compliance, response structure validation
-
-**Shell Integration Test**:
-
-- `test-proxy.sh` - End-to-end proxy validation (requires `jq`)
-
-### Running Tests
-
-```bash
-# With just (Recommended)
-just t           # Run all tests
-just tu          # Run unit tests only
-just ti          # Run integration tests only
-just tn          # Run with nextest (faster, JUnit output)
-just cov         # Generate HTML coverage report
-just covt        # Show coverage summary in terminal
-
-# Raw commands
-cargo test
-cargo nextest run --all-features --workspace --profile ci
-# JUnit report saved to target/nextest/ci/junit.xml
+use crate::protocol::JsonRpcResponse; // Local modules last
 ```
 
-Tests use `cargo-llvm-cov` (not tarpaulin) for accurate async coverage.
-Mock HTTP server tests use `mockito` for reliable async test execution.
-CI uses `cargo-nextest` for faster test execution and JUnit XML reporting.
+Use `as _` for trait imports only needed for methods (e.g., `Context as _`).
 
-## Protocol Implementation
+### Formatting (rustfmt.toml)
 
-**Supported Methods**:
+- **Max width**: 100 chars
+- **Indent**: 4 spaces
+- **Newlines**: Unix (LF)
+- **Imports**: Crate-level granularity, grouped std/external/crate
 
-- `initialize` - Returns protocol version `2024-11-05`, capabilities (tools + resources), server info
-- `tools/list` - Returns single tool: `SearchBun` with `query` string parameter
-- `tools/call` - Forwards to Bun Docs API, extracts `result` from SSE response
-- `resources/list` - Returns single resource: `bun://docs` with Bun Documentation
-- `resources/read` - Reads resource by URI (e.g., `bun://docs?query=Bun.serve`)
+### Types & Naming
 
-**SSE Parsing Logic** (`src/http/mod.rs:68-106`):
+- **Structs**: `PascalCase` - `JsonRpcRequest`, `BunDocsClient`
+- **Functions**: `snake_case` - `forward_request`, `parse_sse_response`
+- **Constants**: `SCREAMING_SNAKE_CASE` - `REQUEST_TIMEOUT_SECS`, `MAX_RETRIES`
+- **Type suffixes**: Use `_SECS`, `_MS`, `_SIZE` for clarity
 
-- Streams response bytes through `eventsource-stream`
-- Parses each event's data field as JSON
-- Looks for `result` or `error` field to identify JSON-RPC response
-- Breaks on first valid response (ignores subsequent events)
-- Returns error if no valid response found in stream
+### Error Handling
 
-## Common Issues
+Use `anyhow` for application errors with context:
 
-**Binary size increased**: Check release profile settings in `Cargo.toml`. Verify `strip = true`, `opt-level = "z"`, and
-`lto = true`.
+```rust
+use anyhow::{Context as _, Result};
 
-**SSE parsing fails**: Bun Docs API may have changed response format. Check `src/http/mod.rs:85` for result/error field
-detection logic.
+fn example() -> Result<Value> {
+    let response = client.get(url).await.context("Failed to send request")?; // Add context
 
-**Timeout on tests**: Default HTTP timeout is 5s (`REQUEST_TIMEOUT_SECS`). Network issues or Bun API slowness may
-require adjustment.
+    response
+        .json()
+        .await
+        .context("Failed to parse JSON response")
+}
+```
 
-**Cross-compilation fails**: Ensure target toolchain installed with `rustup target add <target-triple>`.
+Return `Result<T, String>` for simple validation errors in helpers.
 
-**CLI search returns empty**: Verify network connectivity to `https://bun.com/docs/mcp`. Check RUST_LOG=debug output for errors.
+### Clippy Configuration (Cargo.toml)
+
+Project uses strict clippy with `pedantic`, `nursery`, and `cargo` groups enabled. Key allowances:
+
+```toml
+# Allowed (idiomatic Rust)
+implicit_return    = "allow"  # fn foo() -> i32 { 42 }
+question_mark_used = "allow"  # ? operator
+shadow_reuse       = "allow"  # let line = line.trim()
+expect_used        = "allow"  # .expect("msg") over .unwrap()
+# Warned
+shadow_unrelated   = "warn"   # Shadowing with different type/meaning
+mod_module_files   = "warn"   # Prefer single-file modules
+```
+
+### Documentation
+
+- Module-level `//!` docs for each file
+- Function docs with `///` for public APIs
+- Include `# Arguments`, `# Returns`, `# Errors` sections
+- Use `#[must_use]` for functions returning values that shouldn't be ignored
+
+### Test Organization
+
+Tests live in `#[cfg(test)] mod tests` at bottom of each file:
+
+```rust
+#[cfg(test)]
+#[allow(clippy::expect_used)] // Tests can use expect()
+#[allow(clippy::unwrap_used)] // Tests can use unwrap()
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_name() {
+        // Arrange
+        let input = json!({"key": "value"});
+
+        // Act
+        let result = function_under_test(input);
+
+        // Assert
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn async_test() {
+        // For async tests, use mockito for HTTP mocking
+        let mut server = mockito::Server::new_async().await;
+        let mock = server.mock("POST", "/").create_async().await;
+        // ...
+    }
+}
+```
+
+### Async Patterns
+
+- Use `tokio` runtime with `#[tokio::main]` / `#[tokio::test]`
+- Prefer `async fn` over manual `Future` implementations
+- Use `tokio::time::sleep` for delays (not `std::thread::sleep`)
+
+### Logging
+
+Log to stderr (stdout reserved for JSON-RPC):
+
+```rust
+use tracing::{debug, error, info, warn};
+
+debug!("Detailed info: {}", value); // RUST_LOG=debug
+info!("Normal operation: {}", msg); // Default level
+warn!("Recoverable issue: {}", err);
+error!("Fatal error: {}", err);
+```
+
+## Architecture Reference
+
+```tree
+src/
+  main.rs      - CLI parsing, event loop, JSON-RPC handlers
+  http.rs      - BunDocsClient, SSE parsing, retry logic
+  protocol.rs  - JsonRpcRequest/Response/Error types
+  transport.rs - StdioTransport for stdin/stdout I/O
+tests/
+  integration_test.rs  - Protocol compliance tests
+  cli_integration.rs   - CLI argument tests
+  cli_args.rs          - Argument parsing tests
+  http_edge_cases.rs   - HTTP error handling tests
+```
+
+## Quick Reference
+
+| Task          | Command                |
+| ------------- | ---------------------- |
+| Build release | `just br`              |
+| Run tests     | `just t`               |
+| Single test   | `cargo test test_name` |
+| Format        | `dprint fmt`           |
+| Lint          | `just lint`            |
+| Full check    | `just c`               |
+| Coverage      | `just cov`             |
+| Run debug     | `just run`             |

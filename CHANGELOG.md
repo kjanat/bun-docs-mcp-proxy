@@ -1,5 +1,7 @@
 # Changelog
 
+<!--markdownlint-disable-file no-duplicate-heading-->
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
@@ -14,22 +16,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - actup config for GitHub Actions version management
 - Zed editor settings with dprint integration
 - CODEOWNERS, issue/PR templates, and security policy
+- lefthook for git hooks with dprint integration
+- autofix.ci workflow for automatic formatting on PRs
 
 ### Changed
 
 - **Breaking**: Migrated from Taskfile to [just](https://just.systems) for task automation
+- **Breaking**: Migrated from pre-commit to [lefthook](https://github.com/evilmartians/lefthook) for git hooks
 - Upgraded GitHub Actions: checkout@v6, setup-python@v6, setup-uv@v7, upload-artifact@v6
 - Moved TypeScript tooling to `scripts/ts/` subdirectory
 - Consolidated documentation into AGENTS.md (removed INDEX.md, CONTRIBUTING.md, IMPLEMENTATION_SUMMARY.md)
 - Refactored release workflow build matrix for clarity
 - Normalized em-dashes to hyphens in README
 - CI workflows skip on docs-only changes, Pages workflow triggers on docs changes
+- Use dprint as primary formatter in CI and git hooks
 
 ### Fixed
 
 - Panic on stdout write failure now properly breaks event loop instead of tight-looping (fixes #8)
 - Fixed boolean type for `verbose` input in integration-tests workflow
 - Fixed markdown link syntax in SECURITY.md
+
+### Removed
+
+- pre-commit configuration (replaced by lefthook)
 
 ## [0.3.0] - 2025-11-05
 
