@@ -4,17 +4,17 @@ on:
   push:
     branches: [master]
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE'
-      - '.gitignore'
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".gitignore"
   pull_request:
     branches: [master]
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE'
-      - '.gitignore'
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".gitignore"
 
 env:
   CARGO_TERM_COLOR: always
@@ -38,7 +38,7 @@ jobs:
       RUSTFLAGS: -D warnings
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -46,14 +46,14 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Install Task
-        uses: go-task/setup-task@v1
+      - name: Install just
+        uses: extractions/setup-just@v3
 
       - name: Install test dependencies
         run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Run CI checks
-        run: task --yes ci
+        run: just ci
 
   coverage:
     name: Code Coverage
@@ -66,7 +66,7 @@ jobs:
       RUSTFLAGS: -D warnings
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -74,8 +74,8 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Install Task
-        uses: go-task/setup-task@v1
+      - name: Install just
+        uses: extractions/setup-just@v3
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -84,7 +84,7 @@ jobs:
         uses: taiki-e/install-action@nextest
 
       - name: Run coverage workflow
-        run: task --yes ci-coverage
+        run: just ci-coverage
         continue-on-error: true
 
       - name: Upload coverage to Codecov
@@ -109,7 +109,7 @@ jobs:
       RUSTFLAGS: -D warnings
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -119,11 +119,11 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Install Task
-        uses: go-task/setup-task@v1
+      - name: Install just
+        uses: extractions/setup-just@v3
 
       - name: Run lint checks
-        run: task --yes ci-lint
+        run: just ci-lint
 
   build-matrix:
     name: Build ${{ matrix.platform.target }}
@@ -148,7 +148,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

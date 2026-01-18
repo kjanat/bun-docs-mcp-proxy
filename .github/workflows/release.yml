@@ -19,7 +19,7 @@ jobs:
       RUSTFLAGS: -D warnings
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -29,11 +29,11 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Install Task
-        uses: go-task/setup-task@v1
+      - name: Install just
+        uses: extractions/setup-just@v3
 
       - name: Run lint checks
-        run: task --yes ci-lint
+        run: just ci-lint
 
   build:
     name: Build ${{ matrix.platform.target }}
@@ -48,88 +48,47 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        cross: [true]
         platform:
-          # Linux x86_64
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            cross: false
-            name: linux-x86_64
-
-          # Linux ARM64
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            cross: true
-            name: linux-aarch64
-
-          # Linux x86_64 musl (static)
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            cross: true
-            name: linux-x86_64-musl
-
-          # Linux ARM64 musl (static)
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-musl
-            cross: true
-            name: linux-aarch64-musl
-
-          # macOS x86_64 (Intel)
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            cross: false
-            name: macos-x86_64
-
-          # macOS ARM64 (Apple Silicon)
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            cross: false
-            name: macos-aarch64
-
-          # Windows x86_64
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            cross: false
-            name: windows-x86_64
-
-          # Windows ARM64
-          - os: windows-latest
-            target: aarch64-pc-windows-msvc
-            cross: false
-            name: windows-aarch64
+          # Cross-compiled targets (zig)
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu, name: linux-aarch64 }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, name: linux-x86_64-musl }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, name: linux-aarch64-musl }
+        include:
+          # Native targets
+          - { cross: false, platform: { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, name: linux-x86_64 } }
+          - { cross: false, platform: { os: macos-latest, target: x86_64-apple-darwin, name: macos-x86_64 } }
+          - { cross: false, platform: { os: macos-latest, target: aarch64-apple-darwin, name: macos-aarch64 } }
+          - { cross: false, platform: { os: windows-latest, target: x86_64-pc-windows-msvc, name: windows-x86_64 } }
+          - { cross: false, platform: { os: windows-latest, target: aarch64-pc-windows-msvc, name: windows-aarch64 } }
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform.target }}
+        with: { targets: "${{ matrix.platform.target }}" }
 
       - name: Cache
         uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.platform.target }}
-
-      - name: Install Task
-        uses: go-task/setup-task@v1
+        with: { key: "${{ matrix.platform.target }}" }
 
       - name: Install Zig
-        if: matrix.platform.cross
+        if: matrix.cross
         uses: goto-bus-stop/setup-zig@v2
 
       - name: Install cargo-zigbuild
-        if: matrix.platform.cross
+        if: matrix.cross
         uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-zigbuild
+        with: { tool: cargo-zigbuild }
 
       - name: Build with cargo-zigbuild
-        if: matrix.platform.cross
+        if: matrix.cross
         run: cargo zigbuild --release --target ${{ matrix.platform.target }}
 
       - name: Build native
-        if: ${{ !matrix.platform.cross }}
+        if: ${{ !matrix.cross }}
         run: cargo build --release --target ${{ matrix.platform.target }}
 
       - name: Package (Linux/macOS)
@@ -146,26 +105,27 @@ jobs:
 
       - name: Generate attestation (Linux/macOS)
         if: runner.os != 'Windows'
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v3
         with:
-          subject-path: "target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.tar.gz"
+          subject-path: target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name
+            }}.tar.gz
 
       - name: Generate attestation (Windows)
         if: runner.os == 'Windows'
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v3
         with:
-          subject-path: "target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip"
+          subject-path: target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip
 
       - name: Upload artifact (Linux/macOS)
         if: runner.os != 'Windows'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: bun-docs-mcp-proxy-${{ matrix.platform.name }}
           path: target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.tar.gz
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: bun-docs-mcp-proxy-${{ matrix.platform.name }}
           path: target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip
@@ -179,10 +139,10 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
 

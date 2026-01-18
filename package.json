@@ -1,12 +1,12 @@
 {
+  "scripts": {
+    "fetch-docs": "bun scripts/fetch-docs.ts",
+    "typecheck": "tsc --noEmit"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^5"
-  },
-  "scripts": {
-    "fetch-docs": "bun scripts/fetch-docs.ts",
-    "typecheck": "tsc --noEmit"
   }
 }
