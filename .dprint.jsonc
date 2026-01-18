@@ -11,7 +11,7 @@
     "commands": [
       {
         /** Formats toml files */
-        "command": "uvx tombi format --stdin-filename {{file_path}} -",
+        "command": "tombi format --stdin-filename {{file_path}} -",
         "exts": ["toml"],
       },
       {

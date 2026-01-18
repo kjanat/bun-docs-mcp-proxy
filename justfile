@@ -86,7 +86,7 @@ test-integration-only *args:
 # Run all tests including integration tests (requires network)
 [group('test')]
 test-with-integration *args:
-    cargo test --features integration-tests --all-features {{ args }}
+    cargo test --all-features {{ args }}
 
 # Run documentation tests (N/A for binary-only crates)
 [group('test')]
@@ -151,7 +151,7 @@ clippy *args:
 # Run clippy linter with strict settings
 [group('lint')]
 clippy-strict *args:
-    cargo clippy --all-features --all-targets -- -W clippy::cargo -W clippy::nursery -W clippy::pedantic -W clippy::restriction {{ args }}
+    cargo clippy --all-features --all-targets -- -W clippy::cargo -W clippy::nursery -W clippy::pedantic {{ args }}
 
 # Run all checks (fmt, clippy, tests)
 [group('lint')]

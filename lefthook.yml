@@ -11,6 +11,7 @@ pre-commit:
     check-large-files:
       glob: "*"
       run: |
+        IFS=$'\n'
         for file in {staged_files}; do
           size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
           if [ "$size" -gt 524288 ]; then
