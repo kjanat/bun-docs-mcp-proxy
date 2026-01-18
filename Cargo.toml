@@ -30,7 +30,7 @@ features = ["derive"]
 [dependencies.tokio]
 version          = "1"
 default-features = false
-features         = ["io-std", "io-util", "macros", "rt-multi-thread"]
+features         = ["io-std", "io-util", "macros", "rt-multi-thread", "signal", "time"]
 
 [dev-dependencies]
 assert_cmd = "2"

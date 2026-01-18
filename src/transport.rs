@@ -25,6 +25,8 @@ use anyhow::{Context as _, Result};
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tracing::debug;
 
+use crate::utils::truncate_utf8;
+
 /// The maximum length of messages (in bytes) to display in debug logs.
 /// Messages longer than this will be truncated for readability.
 const DEBUG_MESSAGE_MAX_LEN: usize = 80_usize;
@@ -56,32 +58,6 @@ impl StdioTransport {
         }
     }
 
-    /// Truncates a string to `DEBUG_MESSAGE_MAX_LEN` bytes, ensuring that the truncation
-    /// occurs on a UTF-8 character boundary to prevent invalid UTF-8 sequences.
-    ///
-    /// This is used for debug logging to keep log messages concise.
-    ///
-    /// # Arguments
-    /// * `message` - The string slice to truncate.
-    ///
-    /// # Returns
-    /// A string slice (`&str`) that is a valid UTF-8 truncation of the input `message`.
-    fn truncate_for_debug(message: &str) -> &str {
-        if message.len() <= DEBUG_MESSAGE_MAX_LEN {
-            return message;
-        }
-        // Find the last char whose end position is at or before max length
-        let mut last_valid = 0_usize;
-        for (idx, ch) in message.char_indices() {
-            let end_pos = idx + ch.len_utf8();
-            if end_pos > DEBUG_MESSAGE_MAX_LEN {
-                break;
-            }
-            last_valid = end_pos;
-        }
-        &message[..last_valid]
-    }
-
     /// Read a message from stdin
     ///
     /// Reads one line from stdin. Empty lines are skipped.
@@ -110,7 +86,10 @@ impl StdioTransport {
             return Ok(None);
         }
 
-        debug!("Read message: {}...", Self::truncate_for_debug(line));
+        debug!(
+            "Read message: {}...",
+            truncate_utf8(line, DEBUG_MESSAGE_MAX_LEN)
+        );
         Ok(Some(line.to_owned()))
     }
 
@@ -124,7 +103,10 @@ impl StdioTransport {
     /// # Errors
     /// Returns an error if writing to or flushing stdout fails
     pub async fn write_message(&mut self, message: &str) -> Result<()> {
-        debug!("Writing message: {}...", Self::truncate_for_debug(message));
+        debug!(
+            "Writing message: {}...",
+            truncate_utf8(message, DEBUG_MESSAGE_MAX_LEN)
+        );
 
         self.stdout
             .write_all(message.as_bytes())
@@ -162,12 +144,12 @@ mod tests {
     }
 
     #[test]
-    fn truncate_for_debug() {
+    fn truncate_for_debug_usage() {
         let short = "short message";
-        assert_eq!(StdioTransport::truncate_for_debug(short), short);
+        assert_eq!(truncate_utf8(short, DEBUG_MESSAGE_MAX_LEN), short);
 
         let long = "a".repeat(100_usize);
-        let truncated = StdioTransport::truncate_for_debug(&long);
+        let truncated = truncate_utf8(&long, DEBUG_MESSAGE_MAX_LEN);
         assert_eq!(truncated.len(), DEBUG_MESSAGE_MAX_LEN);
     }
 

@@ -49,11 +49,13 @@ use serde_json::Value;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
+use crate::utils::truncate_utf8;
+
 /// Base URL for the Bun documentation API
 const BUN_DOCS_API: &str = "https://bun.com/docs/mcp";
 
-/// HTTP request timeout in seconds
-const REQUEST_TIMEOUT_SECS: u64 = 5_u64;
+/// Default HTTP request timeout in seconds (can be overridden via `BUN_DOCS_TIMEOUT_SECS` env var)
+const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 30_u64;
 
 /// Maximum number of retry attempts for transient failures
 const MAX_RETRIES: usize = 3_usize;
@@ -76,6 +78,8 @@ pub struct BunDocsClient {
     client: Client,
     /// The base URL for all API requests made by this client.
     base_url: Url,
+    /// Request timeout duration.
+    timeout: Duration,
 }
 
 impl Default for BunDocsClient {
@@ -105,7 +109,22 @@ impl BunDocsClient {
         Ok(Self {
             client: Client::new(),
             base_url: Url::parse(url).context("Invalid base URL")?,
+            timeout: Self::get_timeout_from_env(),
         })
+    }
+
+    /// Gets timeout from environment variable or returns default.
+    ///
+    /// Reads `BUN_DOCS_TIMEOUT_SECS` env var. Falls back to [`DEFAULT_REQUEST_TIMEOUT_SECS`]
+    /// if not set or invalid.
+    fn get_timeout_from_env() -> Duration {
+        std::env::var("BUN_DOCS_TIMEOUT_SECS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .map_or_else(
+                || Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS),
+                Duration::from_secs,
+            )
     }
 
     /// Calculates an exponential backoff delay for retry attempts.
@@ -199,34 +218,6 @@ impl BunDocsClient {
             .join(", ")
     }
 
-    /// Truncates a string to a maximum byte length, ensuring that the truncation
-    /// occurs on a UTF-8 character boundary to prevent invalid UTF-8 sequences.
-    ///
-    /// If the string's byte length is already less than or equal to `max_len`,
-    /// the original string slice is returned.
-    ///
-    /// # Arguments
-    /// * `text` - The string slice to truncate.
-    /// * `max_len` - The maximum desired length in bytes.
-    ///
-    /// # Returns
-    /// A string slice (`&str`) that is a valid UTF-8 truncation of the input `text`.
-    fn truncate_utf8(text: &str, max_len: usize) -> &str {
-        if text.len() <= max_len {
-            return text;
-        }
-        // Find the last char whose end position is at or before max_len
-        let mut last_valid = 0_usize;
-        for (idx, ch) in text.char_indices() {
-            let end_pos = idx + ch.len_utf8();
-            if end_pos > max_len {
-                break;
-            }
-            last_valid = end_pos;
-        }
-        &text[..last_valid]
-    }
-
     /// Forward a JSON-RPC request to the Bun Docs API with automatic retries
     ///
     /// # Arguments
@@ -257,7 +248,7 @@ impl BunDocsClient {
                     "application/json, text/event-stream",
                 )
                 .json(&request)
-                .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS));
+                .timeout(self.timeout);
 
             match rb.send().await {
                 Ok(response) => {
@@ -293,7 +284,7 @@ impl BunDocsClient {
                         &bytes
                     };
                     let body = String::from_utf8_lossy(limited_bytes);
-                    let body_snippet = Self::truncate_utf8(&body, MAX_ERROR_SNIPPET_SIZE);
+                    let body_snippet = truncate_utf8(&body, MAX_ERROR_SNIPPET_SIZE);
                     let header_summary = Self::summarize_headers(&headers);
 
                     let error = anyhow::anyhow!(
@@ -449,7 +440,7 @@ impl BunDocsClient {
             .client
             .get(url)
             .header(reqwest::header::ACCEPT, "text/markdown")
-            .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            .timeout(self.timeout)
             .send()
             .await
             .context("Failed to send request for markdown")?;
@@ -580,22 +571,16 @@ mod tests {
     }
 
     #[test]
-    fn truncate_utf8() {
+    fn truncate_utf8_usage() {
+        // Verify truncate_utf8 from utils module works correctly
         let short = "hello";
-        assert_eq!(BunDocsClient::truncate_utf8(short, 10_usize), short);
+        assert_eq!(truncate_utf8(short, 10_usize), short);
 
         let long = "a".repeat(100_usize);
-        let truncated = BunDocsClient::truncate_utf8(&long, 50_usize);
+        let truncated = truncate_utf8(&long, 50_usize);
         assert!(truncated.len() <= 50_usize);
         assert!(!truncated.is_empty());
         assert!(truncated.is_char_boundary(truncated.len()));
-
-        // Test with Unicode characters
-        // "hello 世界"
-        let unicode = "hello \u{4e16}\u{754c}";
-        let truncated_unicode = BunDocsClient::truncate_utf8(unicode, 8_usize);
-        assert!(truncated_unicode.len() <= 8_usize);
-        assert!(truncated_unicode.is_char_boundary(truncated_unicode.len()));
     }
 
     // Unit tests with mocked HTTP responses (fast, deterministic, offline-friendly)
@@ -856,10 +841,18 @@ mod tests {
     }
 
     #[test]
-    fn timeout_value() {
-        let timeout_secs = REQUEST_TIMEOUT_SECS;
-        assert_eq!(timeout_secs, 5_u64);
+    fn timeout_default_value() {
+        let timeout_secs = DEFAULT_REQUEST_TIMEOUT_SECS;
+        assert_eq!(timeout_secs, 30_u64);
         assert!(timeout_secs > 0_u64);
+    }
+
+    #[test]
+    fn timeout_from_env() {
+        // Test default when env not set
+        let timeout = BunDocsClient::get_timeout_from_env();
+        // Will be default or whatever is set in env
+        assert!(timeout.as_secs() > 0_u64);
     }
 
     #[test]
