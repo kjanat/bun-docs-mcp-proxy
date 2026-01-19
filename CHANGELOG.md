@@ -2,17 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog], and this project adheres to
+[Semantic Versioning].
 
 ## [Unreleased]
+
+Switch to typescript-based MCP proxy for easier maintenance and quicker
+development.
+
+## [rust-legacy] - 2026-01-19
+
+### Changed
+
+- Add AGENTS.md with project guidance for Claude Code
+- Simplify CODEOWNERS and remove redundant entries
+- Normalize formatting across Cargo.toml, dprint, workflows, configs, Taskfile
+- Add opencode MCP entries and adjust zed/dprint integration
+- Migrate README to Taskfile workflows (replaces make/cargo examples)
+- Optimize CI workflow triggers with path filters (skip docs-only changes)
+
+### Added
+
+- CODEOWNERS, issue/PR templates, and security policy
+- Project index documentation for discoverability
+- Manual MCP testing tasks and cross-compilation targets (musl/ARM)
+
+### Fixed
+
+- Propagate write errors in comment formatting (prevents panic)
+
+### Removed
+
+- TESTING.md and INDEX.md (consolidated into AGENTS.md)
 
 ## [0.3.0] - 2025-11-05
 
 ### Added
 
-- CLI search mode with `--search` flag and multiple output formats (JSON, text, markdown)
-- Dual testing strategy: fast unit tests (mocked) + feature-gated integration tests
+- CLI search mode with `--search` flag and multiple output formats (JSON, text,
+  markdown)
+- Dual testing strategy: fast unit tests (mocked) + feature-gated integration
+  tests
 - Comprehensive error path and retry tests with timing validation
 - Path traversal protection and input validation for CLI mode
 - Taskfile automation with 50+ tasks for development workflow
@@ -23,7 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Markdown format fetches raw MDX sources instead of formatting search text
-- Refactored retry loop to use `usize` consistently (removed 3 clippy suppressions)
+- Refactored retry loop to use `usize` consistently (removed 3 clippy
+  suppressions)
 - Replace live API calls with mocked unit tests for faster CI
 - Improved error messages with structured logging for MDX fetch errors
 - Enhanced test isolation using `tempfile::Builder` with relative paths
@@ -125,7 +156,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MIT license
 - GitHub repository setup
 
-[unreleased]: https://github.com/kjanat/bun-docs-mcp-proxy/compare/v0.3.0...HEAD
+<!--tag-link-definitions-start-->
+
+[Unreleased]: https://github.com/kjanat/bun-docs-mcp-proxy/compare/rust-legacy...HEAD
+[rust-legacy]: https://github.com/kjanat/bun-docs-mcp-proxy/compare/v0.3.0...rust-legacy
 [0.3.0]: https://github.com/kjanat/bun-docs-mcp-proxy/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/kjanat/bun-docs-mcp-proxy/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kjanat/bun-docs-mcp-proxy/compare/v0.1.2...v0.2.0
@@ -133,3 +167,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.1]: https://github.com/kjanat/bun-docs-mcp-proxy/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/kjanat/bun-docs-mcp-proxy/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/kjanat/bun-docs-mcp-proxy/releases/tag/v0.0.1
+
+<!--tag-link-definitions-end-->
+
+<!--link-definitions-start-->
+
+[Keep a Changelog]: https://keepachangelog.com/en/1.1.0/
+[Semantic Versioning]: https://semver.org/spec/v2.0.0.html
+
+<!--link-definitions-end-->
+
+<!--markdownlint-disable-file no-duplicate-heading-->
