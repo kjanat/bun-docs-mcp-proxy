@@ -1,0 +1,5 @@
+{
+  "formatter": [{ "external": { "command": "dprint", "arguments": ["fmt", "--stdin", "{buffer_path}"] } }],
+  "prettier": { "allowed": false },
+  "languages": { "YAML": { "wrap_guides": [120] } }
+}

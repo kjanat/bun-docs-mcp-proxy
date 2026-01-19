@@ -1,0 +1,9 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "formatter": {
+    "dprint": {
+      "command": ["dprint", "fmt", "$FILE"],
+      "extensions": [".rs", ".md", ".yml", ".yaml", ".toml", ".json", ".jsonc", ".ts"],
+    },
+  },
+}
