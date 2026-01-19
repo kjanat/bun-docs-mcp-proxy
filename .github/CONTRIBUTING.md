@@ -1,6 +1,7 @@
 # Contributing to Bun Docs MCP Proxy
 
-Thank you for your interest in contributing! This document provides guidelines and instructions for contributing to the project.
+Thank you for your interest in contributing! This document provides guidelines
+and instructions for contributing to the project.
 
 ## Table of Contents
 
@@ -14,7 +15,8 @@ Thank you for your interest in contributing! This document provides guidelines a
 
 ## Code of Conduct
 
-Please be respectful and constructive in all interactions. We're all here to build something useful together.
+Please be respectful and constructive in all interactions. We're all here to
+build something useful together.
 
 ## Getting Started
 
@@ -29,11 +31,14 @@ Please be respectful and constructive in all interactions. We're all here to bui
 
 1. Fork the repository on GitHub
 2. Clone your fork locally:
+
    ```bash
    git clone https://github.com/YOUR_USERNAME/bun-docs-mcp-proxy.git
    cd bun-docs-mcp-proxy
    ```
+
 3. Add upstream remote:
+
    ```bash
    git remote add upstream https://github.com/kjanat/bun-docs-mcp-proxy.git
    ```
@@ -83,6 +88,7 @@ task --list-all
    ```
 
 4. **Watch mode for rapid iteration:**
+
    ```bash
    task dev  # Auto-rebuilds on file changes
    ```
@@ -132,7 +138,8 @@ Before submitting a PR, ensure:
 - [ ] New functionality has tests
 - [ ] Documentation is updated
 - [ ] No compiler warnings
-- [ ] Binary size hasn't increased significantly (check with `ls -lh target/release/bun-docs-mcp-proxy`)
+- [ ] Binary size hasn't increased significantly (check with
+      `ls -lh target/release/bun-docs-mcp-proxy`)
 
 ## Testing
 
@@ -154,7 +161,8 @@ task cov
 
 ### Writing Tests
 
-- **Unit tests** - Place in the same file as the code, in a `#[cfg(test)]` module
+- **Unit tests** - Place in the same file as the code, in a `#[cfg(test)]`
+  module
 - **Integration tests** - Place in `tests/` directory
 - **Mock HTTP responses** - Use `mockito` for testing HTTP client code
 
@@ -239,7 +247,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"SearchBun"
 
 ### Format
 
-```
+```gitcommit
 <type>(<scope>): <subject>
 
 <body>
@@ -260,7 +268,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"SearchBun"
 
 ### Examples
 
-```
+```gitcommit
 feat(cli): add --format markdown option for CLI search
 
 Add support for markdown output format in CLI mode.
@@ -269,7 +277,7 @@ Fetches raw MDX sources from documentation URLs.
 Closes #42
 ```
 
-```
+```gitcommit
 fix(http): handle empty SSE responses gracefully
 
 Previously would panic on empty response stream.
@@ -287,8 +295,11 @@ Fixes #38
 
 ## Questions?
 
-- **Documentation**: Check [README.md](../README.md) and [CLAUDE.md](../CLAUDE.md)
-- **Discussions**: Use [GitHub Discussions](https://github.com/kjanat/bun-docs-mcp-proxy/discussions)
-- **Issues**: Search [existing issues](https://github.com/kjanat/bun-docs-mcp-proxy/issues) first
+- **Documentation**: Check [README.md](../README.md) and
+  [CLAUDE.md](../CLAUDE.md)
+- **Discussions**: Use
+  [GitHub Discussions](https://github.com/kjanat/bun-docs-mcp-proxy/discussions)
+- **Issues**: Search
+  [existing issues](https://github.com/kjanat/bun-docs-mcp-proxy/issues) first
 
 Thank you for contributing! 🎉

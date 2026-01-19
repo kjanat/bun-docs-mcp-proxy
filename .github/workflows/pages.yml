@@ -4,15 +4,15 @@ on:
   push:
     branches: ["master"]
     paths:
-      - 'docs/**'
-      - '**.md'
-      - '.github/workflows/pages.yml'
+      - "docs/**"
+      - "**.md"
+      - ".github/workflows/pages.yml"
   pull_request:
     branches: ["master"]
     paths:
-      - 'docs/**'
-      - '**.md'
-      - '.github/workflows/pages.yml'
+      - "docs/**"
+      - "**.md"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:

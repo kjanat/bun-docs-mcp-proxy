@@ -2,7 +2,7 @@
   "$schema": "https://dprint.dev/schemas/v0.json",
   "typescript": {},
   "json": {},
-  "markdown": {},
+  "markdown": { "emphasisKind": "asterisks", "textWrap": "always" },
   "malva": {},
   "markup": {},
   "yaml": { "printWidth": 120, "proseWrap": "always", "preferSingleLine": true },
@@ -16,6 +16,7 @@
       },
     ],
   },
+  "includes": [".github/**", "**"],
   "excludes": ["**/node_modules", "**/*.lock", "**/target"],
   "plugins": [
     "https://plugins.dprint.dev/typescript-0.95.13.wasm",

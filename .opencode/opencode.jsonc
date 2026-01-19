@@ -3,7 +3,11 @@
   "formatter": {
     "dprint": {
       "command": ["dprint", "fmt", "$FILE"],
-      "extensions": [".rs", ".md", ".yml", ".yaml", ".toml", ".json", ".jsonc", ".ts"],
+      "extensions": [".json", ".jsonc", ".md", ".rs", ".toml", ".ts", ".yaml", ".yml"],
     },
+  },
+  "mcp": {
+    "bun": { "enabled": false },
+    "bun-docs": { "enabled": false },
   },
 }

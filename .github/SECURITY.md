@@ -11,15 +11,17 @@ We release security updates for the following versions:
 
 ## Reporting a Vulnerability
 
-We take security vulnerabilities seriously. If you discover a security issue, please follow these steps:
+We take security vulnerabilities seriously. If you discover a security issue,
+please follow these steps:
 
 ### 1. **Do Not** Open a Public Issue
 
-Please **do not** create a public GitHub issue for security vulnerabilities. This could put users at risk.
+Please **do not** create a public GitHub issue for security vulnerabilities.
+This could put users at risk.
 
 ### 2. Report Privately
 
-Send details to: **info@kajkowalski.nl**
+Send details to: *[info@kajkowalski.nl]*
 
 Include in your report:
 
@@ -33,7 +35,8 @@ Include in your report:
 ### 3. What to Expect
 
 - **Acknowledgment** - We'll confirm receipt within 48 hours
-- **Initial Assessment** - We'll provide an initial assessment within 5 business days
+- **Initial Assessment** - We'll provide an initial assessment within 5 business
+  days
 - **Updates** - We'll keep you informed of progress
 - **Credit** - With your permission, we'll credit you in the security advisory
 - **Timeline** - We aim to release fixes within 30 days for critical issues
@@ -46,7 +49,8 @@ We follow coordinated disclosure:
 2. **Day 1-5** - We assess and verify the issue
 3. **Day 6-30** - We develop and test a fix
 4. **Day 30** - We release the fix and publish a security advisory
-5. **After release** - We may publish details after users have had time to update
+5. **After release** - We may publish details after users have had time to
+   update
 
 We may request a longer disclosure period for complex issues.
 
@@ -67,21 +71,25 @@ When using bun-docs-mcp-proxy:
 - **Dependency Updates** - We use Dependabot to track dependency vulnerabilities
 - **Code Scanning** - We run clippy with strict lints and CI checks
 - **Input Validation** - All JSON-RPC inputs are validated
-- **Error Handling** - Errors are handled gracefully without exposing sensitive info
+- **Error Handling** - Errors are handled gracefully without exposing sensitive
+  info
 - **TLS** - We use `rustls-tls` for secure HTTPS communication
 
 ## Security Features
 
-- **No Arbitrary Code Execution** - Proxy only forwards predefined JSON-RPC methods
+- **No Arbitrary Code Execution** - Proxy only forwards predefined JSON-RPC
+  methods
 - **Input Validation** - All inputs validated against JSON-RPC 2.0 schema
 - **Secure Transport** - HTTPS-only communication with Bun Docs API
 - **No Data Storage** - Proxy doesn't persist any data
-- **Minimal Dependencies** - Small attack surface with carefully vetted dependencies
+- **Minimal Dependencies** - Small attack surface with carefully vetted
+  dependencies
 - **Memory Safety** - Written in Rust for memory safety guarantees
 
 ## Known Limitations
 
-- **No Authentication** - Proxy itself doesn't authenticate clients (relies on MCP client for this)
+- **No Authentication** - Proxy itself doesn't authenticate clients (relies on
+  MCP client for this)
 - **Stdio Transport** - Security depends on the client's stdin/stdout security
 - **Network Access** - Proxy requires network access to `bun.com/docs/mcp`
 
@@ -89,7 +97,8 @@ When using bun-docs-mcp-proxy:
 
 Security fixes are released as:
 
-- **Patch versions** - For backward-compatible security fixes (e.g., 0.2.1 → 0.2.2)
+- **Patch versions** - For backward-compatible security fixes (e.g., 0.2.1 →
+  0.2.2)
 - **GitHub Security Advisories** - Published for all security issues
 - **Release Notes** - Security fixes are clearly marked
 
@@ -101,13 +110,16 @@ We appreciate security researchers who help keep our users safe:
 
 <!-- Security researchers who responsibly disclose vulnerabilities will be listed here -->
 
-_No security issues reported yet._
+*No security issues reported yet.*
 
 ## Questions?
 
 For general security questions (not vulnerability reports):
 
-- **GitHub Discussions** - https://github.com/kjanat/bun-docs-mcp-proxy/discussions
-- **Email** - info@kajkowalski.nl
+- **GitHub Discussions** - [github:kjanat/bun-docs-mcp-proxy/discussions]
+- **Email** - [info@kajkowalski.nl]
 
 Thank you for helping keep bun-docs-mcp-proxy secure!
+
+[info@kajkowalski.nl]: mailto:info@kajkowalski.nl
+[github:kjanat/bun-docs-mcp-proxy/discussions]: https://github.com/kjanat/bun-docs-mcp-proxy/discussions

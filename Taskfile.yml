@@ -216,7 +216,9 @@ tasks:
   test-mcp-init:
     desc: Test MCP initialize method
     deps: [build-release]
-    cmd: echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | {{.BUILD_DIR}}/{{.BINARY_NAME}}
+    cmd: echo
+      '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
+      | {{.BUILD_DIR}}/{{.BINARY_NAME}}
 
   test-mcp-tools-list:
     desc: Test MCP tools/list method
@@ -226,7 +228,9 @@ tasks:
   test-mcp-tools-call:
     desc: Test MCP tools/call method
     deps: [build-release]
-    cmd: echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"SearchBun","arguments":{"query":"Bun.serve"}}}' | {{.BUILD_DIR}}/{{.BINARY_NAME}}
+    cmd: echo
+      '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"SearchBun","arguments":{"query":"Bun.serve"}}}' |
+      {{.BUILD_DIR}}/{{.BINARY_NAME}}
 
   test-mcp-resources-list:
     desc: Test MCP resources/list method
@@ -236,7 +240,8 @@ tasks:
   test-mcp-resources-read:
     desc: Test MCP resources/read method
     deps: [build-release]
-    cmd: echo '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"bun://docs?query=Bun.serve"}}' | {{.BUILD_DIR}}/{{.BINARY_NAME}}
+    cmd: echo '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"bun://docs?query=Bun.serve"}}' |
+      {{.BUILD_DIR}}/{{.BINARY_NAME}}
 
   test-mcp-all:
     desc: Run all manual MCP protocol tests
@@ -412,7 +417,8 @@ tasks:
     desc: Generate SHA256SUMS for all packaged binaries
     cmds:
       - defer: rm -f SHA256SUMS.tmp
-      - find target -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec sha256sum {} \; | sed 's|target/[^/]*/release/||' > SHA256SUMS.tmp
+      - find target -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec sha256sum {} \; | sed
+        's|target/[^/]*/release/||' > SHA256SUMS.tmp
       - mv SHA256SUMS.tmp SHA256SUMS
       - cat SHA256SUMS
 
