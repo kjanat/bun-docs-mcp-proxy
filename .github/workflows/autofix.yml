@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
+---
+name: autofix.ci # needed to securely identify the workflow
+
+on:
+  pull_request:
+  push:
+    branches: ["master"]
+
+permissions:
+  contents: read
+
+jobs:
+  autofix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: autofix-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Install formatters
+        run: npm install -g dprint tombi
+
+      - name: Format all files
+        run: dprint fmt --allow-no-files --excludes .github
+        continue-on-error: true
+
+      - name: Fix clippy warnings
+        run: cargo clippy --fix --allow-dirty --allow-staged --workspace
+        continue-on-error: true
+
+      - uses: autofix-ci/action@v1
