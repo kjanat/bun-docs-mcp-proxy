@@ -22,7 +22,7 @@ build something useful together.
 
 ### Prerequisites
 
-- Rust 1.81.0 or later
+- Rust 1.85.0 or later (edition 2024)
 - Cargo (comes with Rust)
 - [just](https://just.systems) (optional but recommended)
 - Git
@@ -163,7 +163,8 @@ just cov
 
 - **Unit tests** - Place in the same file as the code, in a `#[cfg(test)]`
   module
-- **Integration tests** - Place in `tests/` directory
+- **Integration tests** - Feature-gate behind `integration-tests` for network
+  tests
 - **Mock HTTP responses** - Use `mockito` for testing HTTP client code
 
 ### Test Requirements
@@ -208,7 +209,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"SearchBun"
 
 3. **Update documentation:**
    - Update README.md if adding features
-   - Update CLAUDE.md if changing architecture
+   - Update AGENTS.md if changing architecture
    - Add/update comments for complex code
 
 ### Submitting the PR

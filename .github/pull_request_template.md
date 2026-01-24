@@ -54,7 +54,7 @@ RUST_LOG=debug ./target/release/bun-docs-mcp-proxy
 - [ ] Code is formatted (`just f` or `cargo fmt`)
 - [ ] No new compiler warnings
 - [ ] Documentation updated (if needed)
-- [ ] CLAUDE.md updated (if needed)
+- [ ] AGENTS.md updated (if needed)
 
 ## Breaking changes
 

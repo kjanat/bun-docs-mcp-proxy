@@ -1,0 +1,33 @@
+# cargo-deny configuration
+# https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+ignore  = []
+
+[licenses]
+allow                = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-3-Clause",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",             # webpki-root-certs (CA certificates)
+  "ISC",
+  "MIT",
+  "MIT-0",
+  "OpenSSL",                         # aws-lc-sys (crypto backend)
+  "Unicode-3.0",
+  "Unlicense",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards         = "allow"
+highlight         = "all"
+
+[sources]
+unknown-registry = "warn"
+unknown-git      = "warn"
+allow-registry   = ["https://github.com/rust-lang/crates.io-index"]

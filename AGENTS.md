@@ -133,14 +133,18 @@ stream → parse → stdout (JSON-RPC)
 
 **Module Breakdown**:
 
-- `src/main.rs` - Event loop: read stdin → dispatch by method → write stdout.
-  Handles `initialize`, `tools/list`, `tools/call`
-- `src/protocol/` - JSON-RPC 2.0 types (`JsonRpcRequest`, `JsonRpcResponse`,
+- `src/lib.rs` - Library entry point with public API re-exports
+- `src/bin/bun-docs-mcp-proxy.rs` - CLI entry point with argument parsing
+- `src/app/` - Application core: `mod.rs` (MCP server loop), `handlers.rs`
+  (method dispatch for initialize, tools/list, tools/call, resources/*)
+- `src/mcp/` - JSON-RPC 2.0 types (`JsonRpcRequest`, `JsonRpcResponse`,
   `JsonRpcError`) with success/error builders
-- `src/transport/` - `StdioTransport`: async line-based stdin reader + stdout
-  writer with flush
-- `src/http/` - `BunDocsClient`: HTTP client with SSE parser. Extracts `result`
-  field from SSE data events
+- `src/io/` - `StdioTransport`: async line-based stdin reader + stdout writer
+  with flush
+- `src/upstream/` - `BunDocsClient`: HTTP client with SSE parser. Extracts
+  `result` field from SSE data events
+- `src/format/` - Output formatters: JSON, text, and markdown (MDX fetcher)
+- `src/util.rs` - Shared utilities (truncation, etc.)
 
 **Key Implementation Details**:
 
@@ -153,7 +157,7 @@ stream → parse → stdout (JSON-RPC)
 - Error codes: `-32700` (parse), `-32601` (method not found), `-32603`
   (internal/HTTP errors)
 - Logs to stderr (Zed captures for extension logs), responses to stdout
-- Uses `rustls-tls` (no OpenSSL dependency) for portable TLS
+- Uses `rustls` (no OpenSSL dependency) for portable TLS
 
 ## Performance & Optimization
 
@@ -169,25 +173,14 @@ stream → parse → stdout (JSON-RPC)
 
 ## Testing
 
-**Test Coverage: X%** (X/X lines)
-
-### Test Suite (46 tests)
-
-**Unit Tests** (41 tests):
-
-- `src/protocol/mod.rs` - JSON-RPC serialization/deserialization
-- `src/http/mod.rs` - HTTP client, SSE parsing, mocked API tests
-- `src/transport/mod.rs` - Stdio transport logic
-- `src/main.rs` - Handler functions, error paths
-
-**Integration Tests** (5 tests):
-
-- `tests/integration_test.rs` - Protocol compliance, response structure
-  validation
+Unit tests are co-located with source code in `#[cfg(test)]` modules.
+Integration tests requiring network access are feature-gated behind
+`integration-tests` and can be run with
+`cargo test --features integration-tests`.
 
 **Shell Integration Test**:
 
-- `test-proxy.sh` - End-to-end proxy validation (requires `jq`)
+- `scripts/test-proxy.sh` - End-to-end proxy validation (requires `jq`)
 
 ### Running Tests
 
@@ -222,7 +215,7 @@ HTTP server tests use `mockito` for reliable async test execution. CI uses
   Documentation
 - `resources/read` - Reads resource by URI (e.g., `bun://docs?query=Bun.serve`)
 
-**SSE Parsing Logic** (`src/http/mod.rs:68-106`):
+**SSE Parsing Logic** (`src/upstream/bun_docs.rs`):
 
 - Streams response bytes through `eventsource-stream`
 - Parses each event's data field as JSON
@@ -236,7 +229,7 @@ HTTP server tests use `mockito` for reliable async test execution. CI uses
 Verify `strip = true`, `opt-level = "z"`, and `lto = true`.
 
 **SSE parsing fails**: Bun Docs API may have changed response format. Check
-`src/http/mod.rs:85` for result/error field detection logic.
+`src/upstream/bun_docs.rs` for result/error field detection logic.
 
 **Timeout on tests**: Default HTTP timeout is 5s (`REQUEST_TIMEOUT_SECS`).
 Network issues or Bun API slowness may require adjustment.

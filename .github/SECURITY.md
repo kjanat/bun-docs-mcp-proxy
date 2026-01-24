@@ -6,8 +6,8 @@ We release security updates for the following versions:
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.2.x   | :white_check_mark: |
-| < 0.2.0 | :x:                |
+| 1.x     | :white_check_mark: |
+| < 1.0.0 | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -73,7 +73,7 @@ When using bun-docs-mcp-proxy:
 - **Input Validation** - All JSON-RPC inputs are validated
 - **Error Handling** - Errors are handled gracefully without exposing sensitive
   info
-- **TLS** - We use `rustls-tls` for secure HTTPS communication
+- **TLS** - We use `rustls` for secure HTTPS communication
 
 ## Security Features
 

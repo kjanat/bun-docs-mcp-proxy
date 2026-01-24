@@ -98,12 +98,11 @@ Use with Zed, Claude Code, or any MCP client:
 
 ## Documentation
 
-- **[INDEX.md](INDEX.md)** — Complete project navigation and reference
 - **[CONTRIBUTING.md](.github/CONTRIBUTING.md)** — Development setup and
   workflow
-- **[TESTING.md](.github/TESTING.md)** — Testing strategy and commands
 - **[CHANGELOG.md](CHANGELOG.md)** — Version history and releases
 - **[SECURITY.md](.github/SECURITY.md)** — Security policy
+- **[AGENTS.md](AGENTS.md)** — Architecture and AI agent guidance
 
 ### Quick Reference
 
@@ -123,8 +122,8 @@ just br         # Release build
 just build-all  # All platforms
 ```
 
-See [INDEX.md](INDEX.md) for comprehensive command reference, architecture
-details, and cross-platform builds.
+See [AGENTS.md](AGENTS.md) for comprehensive architecture details and
+cross-platform builds.
 
 ## Performance
 

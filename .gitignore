@@ -8,6 +8,8 @@ target/
 coverage
 coverage/
 *.lcov
+*.profraw
+*.profdata
 cobertura.xml
 codecov.json
 lcov.info
