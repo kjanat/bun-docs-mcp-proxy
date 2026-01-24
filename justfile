@@ -131,8 +131,14 @@ coverage-text:
 # Generate coverage with nextest (for CI)
 [group('coverage')]
 coverage-nextest:
-    cargo llvm-cov nextest --all-features --workspace --codecov --output-path codecov.json
-    @echo "Coverage report -> codecov.json"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source <(cargo llvm-cov show-env --export-prefix)
+    cargo llvm-cov clean --workspace
+    cargo build --all-features
+    cargo llvm-cov nextest --all-features --workspace --no-clean --profile ci --codecov --output-path codecov.json
+    echo "Coverage report -> codecov.json"
+    echo "JUnit report -> target/nextest/ci/junit.xml"
 
 # ===== Linting & Formatting =====
 
@@ -346,7 +352,7 @@ ci: build test fmt-check clippy
 
 # Run CI coverage workflow locally
 [group('ci')]
-ci-coverage: test-nextest coverage-nextest
+ci-coverage: coverage-nextest
 
 # Run CI lint workflow locally
 [group('ci')]
