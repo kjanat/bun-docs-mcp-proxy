@@ -19,6 +19,8 @@ pub fn format_json(result: &serde_json::Value) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, reason = "test code")]
+
     use super::*;
     use serde_json::json;
 

@@ -78,6 +78,8 @@ pub fn extract_doc_entries(result: &serde_json::Value) -> Vec<DocEntry<'_>> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::indexing_slicing, reason = "test code")]
+
     use super::*;
     use serde_json::json;
 
@@ -186,7 +188,7 @@ mod tests {
     #[test]
     fn test_extract_content_texts_non_string_text() {
         let result = json!({"content": [
-            {"text": 123, "type": "text"},  // text is number
+            {"text": 123_i32, "type": "text"},  // text is number
             {"text": "valid", "type": "text"}
         ]});
         let texts = extract_content_texts(&result);

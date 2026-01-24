@@ -79,6 +79,8 @@ pub async fn format_markdown(result: &serde_json::Value, client: &BunDocsClient)
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "test code")]
+
     use super::*;
     use serde_json::json;
 
