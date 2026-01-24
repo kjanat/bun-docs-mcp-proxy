@@ -2,7 +2,7 @@
 # Build artifacts
 debug/
 target/
-bin/
+/bin/
 
 # Code coverage (multiple formats)
 coverage
