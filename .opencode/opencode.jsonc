@@ -10,4 +10,10 @@
     "bun": { "enabled": false },
     "bun-docs": { "enabled": false },
   },
+  "command": {
+    "orchestrate": {
+      "template": "Dispatch researchers/planners -> implementers/builders -> reviewers/critics -> fixers/builders (THIS WORKFLOW FOREACH ITERATION PLS)",
+      "description": "Orchestrator",
+    },
+  },
 }

@@ -1,3 +1,5 @@
+//! CLI integration tests for the bun-docs-mcp-proxy binary.
+
 #![allow(clippy::expect_used, reason = "tests can use expect() for clarity")]
 #![allow(clippy::unwrap_used, reason = "tests can use unwrap() for brevity")]
 #![allow(clippy::indexing_slicing, reason = "tests use array indexing safely")]

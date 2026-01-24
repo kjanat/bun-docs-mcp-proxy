@@ -135,6 +135,10 @@ impl StdioTransport {
     /// # Returns
     /// New `StdioTransport` instance connected to process stdin/stdout
     #[must_use]
+    #[allow(
+        clippy::use_self,
+        reason = "Self is a type alias, Transport works here"
+    )]
     pub fn stdio() -> Self {
         Transport::new(tokio::io::stdin(), tokio::io::stdout())
     }

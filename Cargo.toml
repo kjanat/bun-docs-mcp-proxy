@@ -18,7 +18,7 @@ reqwest            = { version = "0.13", default-features = false, features = ["
 serde              = { version = "1", features = ["derive"] }
 serde_json         = "1.0"
 tokio              = { version = "1", default-features = false, features = ["io-std", "io-util", "macros", "rt-multi-thread", "time"] }
-tracing            = "0.1"
+tracing            = { version = "0.1", features = ["attributes"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
@@ -94,7 +94,6 @@ self_named_module_files           = "warn"
 semicolon_inside_block            = "warn"
 shadow_reuse                      = "warn"
 shadow_same                       = "warn"
-single_call_fn                    = "warn"
 std_instead_of_alloc              = "warn"
 str_to_string                     = "warn"
 string_add                        = "warn"

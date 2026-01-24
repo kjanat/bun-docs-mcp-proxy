@@ -540,8 +540,7 @@ mod tests {
     fn envelope_from_value_invalid() {
         // Missing required fields
         let value = json!({"foo": "bar"});
-        let result = JsonRpcEnvelope::from_value(value);
-        assert!(result.is_err());
+        JsonRpcEnvelope::from_value(value).unwrap_err();
     }
 
     #[test]

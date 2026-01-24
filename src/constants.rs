@@ -119,6 +119,7 @@ pub mod error_code {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "tests can use unwrap()")]
 mod tests {
     use super::*;
 
@@ -162,9 +163,9 @@ mod tests {
 
     #[test]
     fn method_from_str_invalid() {
-        assert!("unknown".parse::<Method>().is_err());
-        assert!("".parse::<Method>().is_err());
-        assert!("Initialize".parse::<Method>().is_err()); // case sensitive
+        let _: () = "unknown".parse::<Method>().unwrap_err();
+        let _: () = "".parse::<Method>().unwrap_err();
+        let _: () = "Initialize".parse::<Method>().unwrap_err(); // case sensitive
     }
 
     #[test]
@@ -185,10 +186,10 @@ mod tests {
 
     #[test]
     fn error_code_constants() {
-        assert_eq!(error_code::PARSE_ERROR, -32700);
-        assert_eq!(error_code::INVALID_REQUEST, -32600);
-        assert_eq!(error_code::METHOD_NOT_FOUND, -32601);
-        assert_eq!(error_code::INVALID_PARAMS, -32602);
-        assert_eq!(error_code::INTERNAL_ERROR, -32603);
+        assert_eq!(error_code::PARSE_ERROR, -32_700_i32);
+        assert_eq!(error_code::INVALID_REQUEST, -32_600_i32);
+        assert_eq!(error_code::METHOD_NOT_FOUND, -32_601_i32);
+        assert_eq!(error_code::INVALID_PARAMS, -32_602_i32);
+        assert_eq!(error_code::INTERNAL_ERROR, -32_603_i32);
     }
 }

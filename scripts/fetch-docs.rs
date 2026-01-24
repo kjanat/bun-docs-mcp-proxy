@@ -1,8 +1,8 @@
 #!/usr/bin/env rust-script
 //! ```cargo
 //! [dependencies]
-//! reqwest = "0.12.24"
-//! tokio = { version = "1.48.0", features = ["full"] }
+//! reqwest = "0.13"
+//! tokio = { version = "1", features = ["full"] }
 //! ```
 
 use tokio::fs;

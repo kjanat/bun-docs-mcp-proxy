@@ -25,7 +25,7 @@ use futures::StreamExt as _;
 use reqwest::{Client, StatusCode, Url, header::HeaderMap};
 use serde_json::Value;
 use std::time::Duration;
-use tracing::{debug, info, warn};
+use tracing::{Span, debug, info, instrument, warn};
 
 /// Base URL for the Bun documentation API
 const BUN_DOCS_API: &str = "https://bun.com/docs/mcp";
@@ -47,6 +47,140 @@ const MAX_ERROR_BODY_SIZE: usize = 100_000_usize;
 
 /// Maximum size for error body snippets in logs (2KB)
 const MAX_ERROR_SNIPPET_SIZE: usize = 2048;
+
+/// Configuration for `BunDocsClient`
+#[derive(Debug, Clone)]
+pub struct BunDocsClientConfig {
+    /// Base URL for API requests
+    pub base_url: Url,
+    /// HTTP request timeout
+    pub timeout: Duration,
+    /// Maximum number of retry attempts for transient failures
+    pub max_retries: usize,
+    /// Base delay for exponential backoff
+    pub backoff_base: Duration,
+    /// Maximum backoff delay
+    pub backoff_max: Duration,
+    /// Maximum error response body size to read (prevents OOM)
+    pub max_error_body_size: usize,
+    /// Maximum size for error body snippets in logs
+    pub max_error_snippet_size: usize,
+}
+
+impl Default for BunDocsClientConfig {
+    fn default() -> Self {
+        #[allow(clippy::expect_used, reason = "URL constant is compile-time valid")]
+        Self {
+            base_url: Url::parse(BUN_DOCS_API).expect("BUN_DOCS_API is a valid URL"),
+            timeout: Duration::from_secs(REQUEST_TIMEOUT_SECS),
+            max_retries: MAX_RETRIES,
+            backoff_base: Duration::from_millis(BACKOFF_BASE_MS),
+            backoff_max: Duration::from_millis(BACKOFF_MAX_MS),
+            max_error_body_size: MAX_ERROR_BODY_SIZE,
+            max_error_snippet_size: MAX_ERROR_SNIPPET_SIZE,
+        }
+    }
+}
+
+/// Builder for `BunDocsClient` with fluent configuration API
+#[derive(Debug, Clone)]
+#[allow(dead_code, reason = "public API for consumers")]
+pub struct BunDocsClientBuilder {
+    config: BunDocsClientConfig,
+    client: Option<Client>,
+}
+
+#[allow(dead_code, reason = "public API for consumers")]
+impl BunDocsClientBuilder {
+    /// Creates a new builder with default configuration
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            config: BunDocsClientConfig::default(),
+            client: None,
+        }
+    }
+
+    /// Sets the base URL for API requests
+    ///
+    /// # Errors
+    /// Returns an error if the URL cannot be parsed
+    pub fn base_url(mut self, url: &str) -> Result<Self> {
+        self.config.base_url = Url::parse(url).context("Invalid base URL")?;
+        Ok(self)
+    }
+
+    /// Sets the HTTP request timeout
+    #[must_use]
+    pub const fn timeout(mut self, timeout: Duration) -> Self {
+        self.config.timeout = timeout;
+        self
+    }
+
+    /// Sets the maximum number of retry attempts for failed requests.
+    ///
+    /// The value represents total attempts: `max_retries(1)` means try once (no retries),
+    /// `max_retries(3)` means up to 3 attempts total. A value of 0 is treated as 1 (single attempt).
+    #[must_use]
+    pub const fn max_retries(mut self, retries: usize) -> Self {
+        self.config.max_retries = retries;
+        self
+    }
+
+    /// Sets the base delay for exponential backoff
+    #[must_use]
+    pub const fn backoff_base(mut self, delay: Duration) -> Self {
+        self.config.backoff_base = delay;
+        self
+    }
+
+    /// Sets the maximum backoff delay
+    #[must_use]
+    pub const fn backoff_max(mut self, delay: Duration) -> Self {
+        self.config.backoff_max = delay;
+        self
+    }
+
+    /// Sets the maximum error response body size to read
+    #[must_use]
+    pub const fn max_error_body_size(mut self, size: usize) -> Self {
+        self.config.max_error_body_size = size;
+        self
+    }
+
+    /// Sets the maximum size for error body snippets in logs
+    #[must_use]
+    pub const fn max_error_snippet_size(mut self, size: usize) -> Self {
+        self.config.max_error_snippet_size = size;
+        self
+    }
+
+    /// Sets a custom HTTP client.
+    ///
+    /// Note: Per-request timeouts are set via [`Self::timeout()`], but any default timeout
+    /// configured on the injected client may also apply. If you set timeouts on both,
+    /// the shorter timeout will take effect for each request.
+    #[must_use]
+    pub fn http_client(mut self, client: Client) -> Self {
+        self.client = Some(client);
+        self
+    }
+
+    /// Builds the `BunDocsClient` with the configured options
+    #[must_use]
+    pub fn build(self) -> BunDocsClient {
+        BunDocsClient {
+            client: self.client.unwrap_or_default(),
+            config: self.config,
+        }
+    }
+}
+
+impl Default for BunDocsClientBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Parsed response from the upstream Bun Docs MCP server.
 /// Distinguishes between successful results and JSON-RPC errors.
@@ -119,8 +253,8 @@ impl UpstreamResponse {
 pub struct BunDocsClient {
     /// The underlying `reqwest::Client` used for making HTTP requests.
     client: Client,
-    /// The base URL for all API requests made by this client.
-    base_url: Url,
+    /// Configuration for this client
+    config: BunDocsClientConfig,
 }
 
 impl Default for BunDocsClient {
@@ -135,8 +269,7 @@ impl BunDocsClient {
     /// Uses a compile-time validated URL constant, so this cannot fail at runtime.
     #[must_use]
     pub fn new() -> Self {
-        #[allow(clippy::expect_used, reason = "URL constant is compile-time valid")]
-        Self::with_base_url(BUN_DOCS_API).expect("BUN_DOCS_API is a valid URL")
+        Self::builder().build()
     }
 
     /// Creates a new client with a custom base URL.
@@ -146,34 +279,52 @@ impl BunDocsClient {
     ///
     /// # Errors
     /// Returns an error if the URL cannot be parsed
+    #[allow(dead_code, reason = "public API for consumers")]
     pub fn with_base_url(url: &str) -> Result<Self> {
-        Ok(Self {
-            client: Client::new(),
-            base_url: Url::parse(url).context("Invalid base URL")?,
-        })
+        Ok(Self::builder().base_url(url)?.build())
+    }
+
+    /// Returns a new builder for configuring a `BunDocsClient`
+    #[must_use]
+    #[allow(dead_code, reason = "public API for consumers")]
+    pub fn builder() -> BunDocsClientBuilder {
+        BunDocsClientBuilder::new()
+    }
+
+    /// Returns a reference to the client configuration
+    #[must_use]
+    #[allow(dead_code, reason = "public API for consumers")]
+    pub const fn config(&self) -> &BunDocsClientConfig {
+        &self.config
     }
 
     /// Calculates an exponential backoff delay for retry attempts.
     ///
-    /// The delay increases with each `attempt` (e.g., 200ms, 400ms, 800ms) up to a maximum of 1000ms.
+    /// The delay increases with each `attempt` (e.g., 200ms, 400ms, 800ms) up to the configured max.
     /// This helps prevent overwhelming the server during transient failures.
     ///
     /// # Arguments
     /// * `attempt` - The current retry attempt number (must be >= 1).
     ///
     /// # Returns
-    /// The calculated delay in milliseconds.
-    fn backoff_delay_ms(attempt: usize) -> u64 {
+    /// The calculated delay as a `Duration`.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "backoff durations are small enough to fit in u64"
+    )]
+    fn backoff_delay(&self, attempt: usize) -> Duration {
         debug_assert!(attempt > 0_usize, "attempt must be >= 1");
-        // 200ms, 400ms, 800ms (cap at 1000ms)
-        // Safe: attempt.saturating_sub(1) will be small in practice (<= MAX_RETRIES=3)
+        // 200ms, 400ms, 800ms (cap at configured max)
+        // Safe: attempt.saturating_sub(1) will be small in practice (<= max_retries)
         #[expect(
             clippy::cast_possible_truncation,
-            reason = "attempt.saturating_sub(1) is bounded by MAX_RETRIES=3, fits in u32"
+            reason = "attempt.saturating_sub(1) is bounded by max_retries, fits in u32"
         )]
-        let base =
-            BACKOFF_BASE_MS.saturating_mul(1_u64 << (attempt.saturating_sub(1_usize) as u32));
-        base.min(BACKOFF_MAX_MS)
+        let multiplier = 1_u64 << (attempt.saturating_sub(1_usize) as u32);
+        let base_ms = self.config.backoff_base.as_millis() as u64;
+        let delay_ms = base_ms.saturating_mul(multiplier);
+        let max_ms = self.config.backoff_max.as_millis() as u64;
+        Duration::from_millis(delay_ms.min(max_ms))
     }
 
     /// Determines if an HTTP status code indicates a transient error that is worth retrying.
@@ -280,30 +431,38 @@ impl BunDocsClient {
         clippy::too_many_lines,
         reason = "complex retry logic with error handling"
     )]
+    #[instrument(
+        name = "http_forward",
+        skip(self, request),
+        fields(attempt = tracing::field::Empty, status = tracing::field::Empty, response_size = tracing::field::Empty)
+    )]
     pub async fn forward_request(&self, request: Value) -> Result<UpstreamResponse> {
         debug!("Forwarding request to Bun Docs API");
 
         let mut last_error: Option<anyhow::Error> = None;
 
-        for attempt in 1_usize..=MAX_RETRIES {
+        let max_retries = self.config.max_retries.max(1); // Ensure at least one attempt
+        for attempt in 1_usize..=max_retries {
+            Span::current().record("attempt", attempt);
             // Build request each attempt
             let rb = self
                 .client
-                .post(self.base_url.as_str())
+                .post(self.config.base_url.as_str())
                 .header(reqwest::header::CONTENT_TYPE, content_type::JSON)
                 .header(
                     reqwest::header::ACCEPT,
                     format!("{}, {}", content_type::JSON, content_type::SSE),
                 )
                 .json(&request)
-                .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS));
+                .timeout(self.config.timeout);
 
             match rb.send().await {
                 Ok(response) => {
                     let status = response.status();
+                    Span::current().record("status", status.as_u16());
                     info!(
                         "Bun Docs API response status: {} (attempt {} of {})",
-                        status, attempt, MAX_RETRIES
+                        status, attempt, max_retries
                     );
 
                     let headers = response.headers().clone();
@@ -321,6 +480,10 @@ impl BunDocsClient {
                                 .await
                                 .context("Failed to parse JSON response")?
                         };
+                        // Record approximate response size for debugging truncation issues
+                        if let Ok(serialized) = serde_json::to_string(&json_value) {
+                            Span::current().record("response_size", serialized.len());
+                        }
                         return UpstreamResponse::from_json(json_value);
                     }
                     // Read body (truncated) for context
@@ -328,9 +491,11 @@ impl BunDocsClient {
                         warn!("Failed to read error response body: {}", error);
                         Bytes::default()
                     });
-                    let limited_bytes: &[u8] = bytes.get(..MAX_ERROR_BODY_SIZE).unwrap_or(&bytes);
+                    let limited_bytes: &[u8] = bytes
+                        .get(..self.config.max_error_body_size)
+                        .unwrap_or(&bytes);
                     let body = String::from_utf8_lossy(limited_bytes);
-                    let body_snippet = truncate_utf8(&body, MAX_ERROR_SNIPPET_SIZE);
+                    let body_snippet = truncate_utf8(&body, self.config.max_error_snippet_size);
                     let header_summary = Self::summarize_headers(&headers);
 
                     let ct_display = if resp_content_type.is_empty() {
@@ -343,11 +508,10 @@ impl BunDocsClient {
                     );
 
                     // Retry on transient server statuses
-                    if Self::is_transient_status(status) && attempt < MAX_RETRIES {
+                    if Self::is_transient_status(status) && attempt < max_retries {
                         // Use Retry-After header if present (for 429), else exponential backoff
-                        let delay = Self::retry_after_delay(&headers).unwrap_or_else(|| {
-                            Duration::from_millis(Self::backoff_delay_ms(attempt))
-                        });
+                        let delay = Self::retry_after_delay(&headers)
+                            .unwrap_or_else(|| self.backoff_delay(attempt));
                         warn!(
                             "Transient HTTP status {}, retrying in {:?} (attempt {})",
                             status,
@@ -367,15 +531,15 @@ impl BunDocsClient {
                         error.is_connect() || error.is_timeout() || error.is_request();
                     let err = anyhow::anyhow!("Failed to send request to Bun Docs API: {error}");
 
-                    if is_transient && attempt < MAX_RETRIES {
+                    if is_transient && attempt < max_retries {
                         warn!(
                             "Network error: {}. Retrying (attempt {} of {})",
                             err,
                             attempt + 1,
-                            MAX_RETRIES
+                            max_retries
                         );
-                        let delay = Self::backoff_delay_ms(attempt);
-                        tokio::time::sleep(Duration::from_millis(delay)).await;
+                        let delay = self.backoff_delay(attempt);
+                        tokio::time::sleep(delay).await;
                         last_error = Some(err);
                         continue;
                     }
@@ -408,6 +572,7 @@ impl BunDocsClient {
     /// - No valid JSON-RPC response (i.e., an object with a `result` or `error` field)
     ///   is found within the stream.
     /// - JSON parsing of an SSE event's data fails.
+    #[instrument(name = "sse_parse", skip(self, response))]
     async fn parse_sse_response(&self, response: reqwest::Response) -> Result<Value> {
         let mut event_stream = response.bytes_stream().eventsource();
         let mut json_response: Option<Value> = None;
@@ -480,6 +645,7 @@ impl BunDocsClient {
     /// - The HTTP request fails
     /// - The server returns a non-success status code
     /// - The response body cannot be read as UTF-8 text
+    #[instrument(name = "fetch_mdx", skip(self), fields(url = %url))]
     pub async fn fetch_doc_markdown(&self, url: &str) -> Result<String> {
         debug!("Fetching MDX for URL: {}", url);
 
@@ -487,7 +653,7 @@ impl BunDocsClient {
             .client
             .get(url)
             .header(reqwest::header::ACCEPT, content_type::MARKDOWN)
-            .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            .timeout(self.config.timeout)
             .send()
             .await
             .context("Failed to send request for markdown")?;
@@ -522,20 +688,20 @@ mod tests {
     #[test]
     fn client_creation() {
         let client = BunDocsClient::new();
-        assert_eq!(client.base_url.as_str(), BUN_DOCS_API);
+        assert_eq!(client.config().base_url.as_str(), BUN_DOCS_API);
     }
 
     #[test]
     fn client_default() {
         let client = BunDocsClient::default();
-        assert_eq!(client.base_url.as_str(), BUN_DOCS_API);
+        assert_eq!(client.config().base_url.as_str(), BUN_DOCS_API);
     }
 
     #[test]
     fn client_with_base_url() {
         let custom_url = "https://example.com/api";
         let client = BunDocsClient::with_base_url(custom_url).expect("valid URL should parse");
-        assert_eq!(client.base_url.as_str(), custom_url);
+        assert_eq!(client.config().base_url.as_str(), custom_url);
     }
 
     #[test]
@@ -545,11 +711,24 @@ mod tests {
     }
 
     #[test]
-    fn backoff_delay_milliseconds() {
-        assert_eq!(BunDocsClient::backoff_delay_ms(1_usize), 200_u64);
-        assert_eq!(BunDocsClient::backoff_delay_ms(2_usize), 400_u64);
-        assert_eq!(BunDocsClient::backoff_delay_ms(3_usize), 800_u64);
-        assert_eq!(BunDocsClient::backoff_delay_ms(4_usize), 1000_u64); // capped
+    fn backoff_delay() {
+        let client = BunDocsClient::new();
+        assert_eq!(
+            client.backoff_delay(1_usize),
+            Duration::from_millis(200_u64)
+        );
+        assert_eq!(
+            client.backoff_delay(2_usize),
+            Duration::from_millis(400_u64)
+        );
+        assert_eq!(
+            client.backoff_delay(3_usize),
+            Duration::from_millis(800_u64)
+        );
+        assert_eq!(
+            client.backoff_delay(4_usize),
+            Duration::from_millis(1000_u64)
+        ); // capped
     }
 
     #[test]
@@ -1287,9 +1466,7 @@ mod tests {
         assert!(result.is_ok(), "Should succeed after transient 503 retry");
         let upstream = result.expect("successful response");
         assert!(upstream.is_ok(), "Should be UpstreamResponse::Ok");
-        // Verifies src/http.rs line 315-319: warn!("Transient HTTP status...")
-        // Verifies line 321: backoff_delay_ms calculation
-        // Verifies line 322: sleep execution
+        // Verifies warn!("Transient HTTP status..."), backoff_delay calculation, sleep execution
     }
 
     #[tokio::test]
@@ -1437,24 +1614,21 @@ mod tests {
     fn upstream_response_from_json_missing_error_code() {
         // JsonRpcEnvelope requires code field in error object
         let json = json!({"jsonrpc": "2.0", "error": {"message": "No code"}, "id": 1});
-        let result = UpstreamResponse::from_json(json);
-        assert!(result.is_err());
+        UpstreamResponse::from_json(json).unwrap_err();
     }
 
     #[test]
     fn upstream_response_from_json_missing_error_message() {
         // JsonRpcEnvelope requires message field in error object
         let json = json!({"jsonrpc": "2.0", "error": {"code": -32600}, "id": 1});
-        let result = UpstreamResponse::from_json(json);
-        assert!(result.is_err());
+        UpstreamResponse::from_json(json).unwrap_err();
     }
 
     #[test]
     fn upstream_response_from_json_neither_field() {
         // JSON with neither result nor error field should fail
         let json = json!({"other": "field"});
-        let result = UpstreamResponse::from_json(json);
-        assert!(result.is_err());
+        UpstreamResponse::from_json(json).unwrap_err();
     }
 
     #[test]
@@ -1470,5 +1644,133 @@ mod tests {
         let result = UpstreamResponse::from_json(json);
         // Should parse as Success (untagged enum order)
         assert!(matches!(result, Ok(UpstreamResponse::Ok(_))));
+    }
+}
+
+// Additional builder tests - added at end of file temporarily
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "tests can use expect()")]
+#[allow(clippy::unwrap_used, reason = "tests can use unwrap()")]
+mod builder_tests {
+    use super::*;
+
+    #[test]
+    fn builder_with_defaults() {
+        let client = BunDocsClientBuilder::new().build();
+        let config = client.config();
+
+        assert_eq!(config.base_url.as_str(), BUN_DOCS_API);
+        assert_eq!(config.timeout, Duration::from_secs(REQUEST_TIMEOUT_SECS));
+        assert_eq!(config.max_retries, MAX_RETRIES);
+        assert_eq!(config.backoff_base, Duration::from_millis(BACKOFF_BASE_MS));
+        assert_eq!(config.backoff_max, Duration::from_millis(BACKOFF_MAX_MS));
+        assert_eq!(config.max_error_body_size, MAX_ERROR_BODY_SIZE);
+        assert_eq!(config.max_error_snippet_size, MAX_ERROR_SNIPPET_SIZE);
+    }
+
+    #[test]
+    fn builder_default_impl() {
+        let builder1 = BunDocsClientBuilder::new();
+        let builder2 = BunDocsClientBuilder::default();
+        let config1 = builder1.build().config;
+        let config2 = builder2.build().config;
+        assert_eq!(config1.base_url, config2.base_url);
+        assert_eq!(config1.timeout, config2.timeout);
+    }
+
+    #[test]
+    fn builder_with_custom_values() {
+        let custom_timeout = Duration::from_secs(30);
+        let custom_retries = 5_usize;
+        let custom_backoff_base = Duration::from_millis(100);
+        let custom_backoff_max = Duration::from_secs(5);
+        let custom_error_body_size = 50_000_usize;
+        let custom_error_snippet_size = 1024_usize;
+
+        let client = BunDocsClientBuilder::new()
+            .timeout(custom_timeout)
+            .max_retries(custom_retries)
+            .backoff_base(custom_backoff_base)
+            .backoff_max(custom_backoff_max)
+            .max_error_body_size(custom_error_body_size)
+            .max_error_snippet_size(custom_error_snippet_size)
+            .build();
+
+        let config = client.config();
+        assert_eq!(config.timeout, custom_timeout);
+        assert_eq!(config.max_retries, custom_retries);
+        assert_eq!(config.backoff_base, custom_backoff_base);
+        assert_eq!(config.backoff_max, custom_backoff_max);
+        assert_eq!(config.max_error_body_size, custom_error_body_size);
+        assert_eq!(config.max_error_snippet_size, custom_error_snippet_size);
+    }
+
+    #[test]
+    fn builder_base_url_valid() {
+        let custom_url = "https://example.com/api";
+        let client = BunDocsClientBuilder::new()
+            .base_url(custom_url)
+            .unwrap()
+            .build();
+
+        assert_eq!(client.config().base_url.as_str(), custom_url);
+    }
+
+    #[test]
+    fn builder_base_url_invalid() {
+        BunDocsClientBuilder::new()
+            .base_url("not a valid url")
+            .unwrap_err();
+    }
+
+    #[test]
+    fn builder_with_custom_http_client() {
+        let custom_client = Client::new();
+        let _client = BunDocsClientBuilder::new()
+            .http_client(custom_client)
+            .build();
+    }
+
+    #[test]
+    fn builder_static_method() {
+        let client = BunDocsClient::builder().build();
+        assert_eq!(client.config().base_url.as_str(), BUN_DOCS_API);
+    }
+
+    #[test]
+    fn config_accessor() {
+        let client = BunDocsClient::new();
+        let config = client.config();
+        assert_eq!(config.timeout, Duration::from_secs(REQUEST_TIMEOUT_SECS));
+        assert_eq!(config.max_retries, MAX_RETRIES);
+    }
+
+    #[test]
+    fn builder_backoff_delay_uses_config() {
+        let client = BunDocsClientBuilder::new()
+            .backoff_base(Duration::from_millis(100))
+            .backoff_max(Duration::from_millis(500))
+            .build();
+
+        assert_eq!(client.backoff_delay(1_usize), Duration::from_millis(100));
+        assert_eq!(client.backoff_delay(2_usize), Duration::from_millis(200));
+        assert_eq!(client.backoff_delay(3_usize), Duration::from_millis(400));
+        assert_eq!(client.backoff_delay(4_usize), Duration::from_millis(500));
+    }
+
+    #[test]
+    fn config_default_impl() {
+        let config = BunDocsClientConfig::default();
+        assert_eq!(config.base_url.as_str(), BUN_DOCS_API);
+        assert_eq!(config.timeout, Duration::from_secs(REQUEST_TIMEOUT_SECS));
+        assert_eq!(config.max_retries, MAX_RETRIES);
+    }
+
+    #[test]
+    fn builder_zero_retries_allowed() {
+        // max_retries(0) should be treated as 1 attempt (single try, no retries)
+        let client = BunDocsClientBuilder::new().max_retries(0).build();
+        // Config stores 0, but forward_request uses .max(1) to ensure at least one attempt
+        assert_eq!(client.config().max_retries, 0);
     }
 }

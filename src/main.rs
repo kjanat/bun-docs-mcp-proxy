@@ -27,8 +27,8 @@ use constants::{
 use core::fmt::Write as _;
 use protocol::{JsonRpcRequest, JsonRpcResponse};
 use std::fs;
-use tracing::{debug, error, info, warn};
-use tracing_subscriber::EnvFilter;
+use tracing::{Instrument as _, debug, error, info, info_span, instrument, warn};
+use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 
 /// Output format for CLI search results
 #[derive(Debug, Clone, ValueEnum)]
@@ -205,6 +205,7 @@ fn init_logging() {
         )
         .with_writer(std::io::stderr)
         .without_time()
+        .with_span_events(FmtSpan::CLOSE)
         .init();
 }
 
@@ -403,6 +404,7 @@ fn validate_output_path(path: &str) -> Result<(), String> {
 ///
 /// # Returns
 /// An `anyhow::Result<()>` indicating success or failure.
+#[instrument(name = "cli_search", skip(format, output_path), fields(format = ?format, has_output = output_path.is_some()))]
 async fn direct_search(
     query: &str,
     format: &OutputFormat,
@@ -465,10 +467,7 @@ async fn direct_search(
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Parse CLI arguments
     let cli = Cli::parse();
-
-    // Initialize logging early for both CLI and server modes
     init_logging();
 
     // CLI search mode
@@ -477,6 +476,11 @@ async fn main() -> Result<()> {
     }
 
     // MCP server mode
+    run_mcp_server().await
+}
+
+/// Runs the MCP JSON-RPC server loop over stdio.
+async fn run_mcp_server() -> Result<()> {
     info!("Bun Docs MCP Proxy starting");
 
     let mut transport = transport::StdioTransport::stdio();
@@ -484,8 +488,7 @@ async fn main() -> Result<()> {
 
     loop {
         // Read JSON-RPC request from stdin
-        let read_result = transport.read_message().await;
-        let message = match read_result {
+        let message = match transport.read_message().await {
             Ok(Some(msg)) => msg,
             Ok(None) => {
                 info!("Connection closed");
@@ -497,7 +500,6 @@ async fn main() -> Result<()> {
             }
         };
 
-        // Log raw message for debugging parse errors
         debug!(
             "Raw message ({} bytes): {}",
             message.len(),
@@ -514,9 +516,7 @@ async fn main() -> Result<()> {
                     truncate_for_log(&message, 200)
                 );
 
-                // Try to extract id from malformed JSON for better error correlation
                 let extracted_id = extract_id_from_json(&message);
-
                 let error_response = JsonRpcResponse::error(
                     extracted_id,
                     error_code::PARSE_ERROR,
@@ -540,45 +540,50 @@ async fn main() -> Result<()> {
 
         info!("Received method: {}", request.method);
 
-        // Handle request based on method
-        let response = match request.method.parse::<Method>() {
-            Ok(Method::ToolsCall) => {
-                handle_tools_call(&http_client, &request, request_id.clone()).await
+        // Handle request based on method, wrapped in a span for tracing
+        let span = info_span!("mcp_request", id = %request_id, method = %request.method);
+        let response = async {
+            match request.method.parse::<Method>() {
+                Ok(Method::ToolsCall) => {
+                    handle_tools_call(&http_client, &request, request_id.clone()).await
+                }
+                Ok(Method::ToolsList) => handle_tools_list(request_id.clone()),
+                Ok(Method::ResourcesList) => handle_resources_list(request_id.clone()),
+                Ok(Method::ResourcesRead) => {
+                    handle_resources_read(&http_client, &request, request_id.clone()).await
+                }
+                Ok(Method::Initialize) => handle_initialize(request_id.clone()),
+                Ok(Method::NotificationsInitialized) => {
+                    debug!("Unexpected notifications/initialized with id");
+                    JsonRpcResponse::success(request_id.clone(), serde_json::Value::Null)
+                }
+                Err(()) => {
+                    error!("Unsupported method: {}", request.method);
+                    JsonRpcResponse::error(
+                        request_id,
+                        error_code::METHOD_NOT_FOUND,
+                        format!("Method not found: {}", request.method),
+                    )
+                }
             }
-            Ok(Method::ToolsList) => handle_tools_list(request_id.clone()),
-            Ok(Method::ResourcesList) => handle_resources_list(request_id.clone()),
-            Ok(Method::ResourcesRead) => {
-                handle_resources_read(&http_client, &request, request_id.clone()).await
-            }
-            Ok(Method::Initialize) => handle_initialize(request_id.clone()),
-            Ok(Method::NotificationsInitialized) => {
-                // This shouldn't happen since notifications have no id, but handle gracefully
-                debug!("Unexpected notifications/initialized with id");
-                continue;
-            }
-            Err(()) => {
-                error!("Unsupported method: {}", request.method);
-                JsonRpcResponse::error(
-                    request_id,
-                    error_code::METHOD_NOT_FOUND,
-                    format!("Method not found: {}", request.method),
-                )
-            }
-        };
+        }
+        .instrument(span)
+        .await;
+
+        if request.method == "notifications/initialized" {
+            continue;
+        }
 
         // Send response back to stdout
-        let serialize_result = serde_json::to_string(&response);
-        match serialize_result {
+        match serde_json::to_string(&response) {
             Ok(response_str) => {
-                let write_result = transport.write_message(&response_str).await;
-                if let Err(e) = write_result {
+                if let Err(e) = transport.write_message(&response_str).await {
                     error!("Failed to write response: {}", e);
                     break;
                 }
             }
             Err(e) => {
                 error!("Failed to serialize response: {}", e);
-                // Serialization failures are likely unrecoverable (e.g., internal data corruption)
                 break;
             }
         }
@@ -601,11 +606,26 @@ async fn main() -> Result<()> {
 ///
 /// # Returns
 /// A `JsonRpcResponse` to be sent back to the client.
+#[instrument(name = "tools_call", skip(client, request), fields(tool_name = tracing::field::Empty, query = tracing::field::Empty))]
 async fn handle_tools_call(
     client: &http::BunDocsClient,
     request: &JsonRpcRequest,
     request_id: serde_json::Value,
 ) -> JsonRpcResponse {
+    // Extract tool name and query for tracing
+    if let Some(params) = &request.params {
+        if let Some(name) = params.get("name").and_then(|v| v.as_str()) {
+            tracing::Span::current().record("tool_name", name);
+        }
+        if let Some(query) = params
+            .get("arguments")
+            .and_then(|a| a.get("query"))
+            .and_then(|v| v.as_str())
+        {
+            tracing::Span::current().record("query", query);
+        }
+    }
+
     // Forward entire request to Bun Docs API
     let original_request = serde_json::json!({
         "jsonrpc": "2.0",
@@ -622,7 +642,7 @@ async fn handle_tools_call(
                 http::UpstreamResponse::Err {
                     code,
                     message,
-                    data,
+                    data: err_data,
                 } => {
                     // Upstream returned a JSON-RPC error - propagate it
                     // Note: code is i64 from upstream, but JsonRpcError uses i32
@@ -632,8 +652,8 @@ async fn handle_tools_call(
                         reason = "JSON-RPC error codes fit in i32"
                     )]
                     let code_i32 = code as i32;
-                    if let Some(data) = data {
-                        JsonRpcResponse::error_with_data(request_id, code_i32, message, data)
+                    if let Some(extra) = err_data {
+                        JsonRpcResponse::error_with_data(request_id, code_i32, message, extra)
                     } else {
                         JsonRpcResponse::error(request_id, code_i32, message)
                     }
@@ -718,6 +738,7 @@ fn handle_resources_list(request_id: serde_json::Value) -> JsonRpcResponse {
 ///
 /// # Returns
 /// A `JsonRpcResponse` containing the resource content or an error.
+#[instrument(name = "resources_read", skip(client, request), fields(uri = tracing::field::Empty))]
 async fn handle_resources_read(
     client: &http::BunDocsClient,
     request: &JsonRpcRequest,
@@ -734,7 +755,10 @@ async fn handle_resources_read(
 
     // Extract URI parameter
     let uri = match get_string_param(params, "uri") {
-        Ok(u) => u,
+        Ok(u) => {
+            tracing::Span::current().record("uri", u);
+            u
+        }
         Err(msg) => {
             return JsonRpcResponse::error(request_id, error_code::INVALID_PARAMS, msg);
         }
@@ -793,7 +817,7 @@ async fn handle_resources_read(
                 http::UpstreamResponse::Err {
                     code,
                     message,
-                    data,
+                    data: err_data,
                 } => {
                     // Upstream returned a JSON-RPC error - propagate it
                     #[expect(
@@ -801,8 +825,8 @@ async fn handle_resources_read(
                         reason = "JSON-RPC error codes fit in i32"
                     )]
                     let code_i32 = code as i32;
-                    if let Some(data) = data {
-                        JsonRpcResponse::error_with_data(request_id, code_i32, message, data)
+                    if let Some(extra) = err_data {
+                        JsonRpcResponse::error_with_data(request_id, code_i32, message, extra)
                     } else {
                         JsonRpcResponse::error(request_id, code_i32, message)
                     }
