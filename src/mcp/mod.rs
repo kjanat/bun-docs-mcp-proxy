@@ -1,7 +1,15 @@
-//! Constants and enums for the Bun Docs MCP Proxy.
+//! MCP protocol types, constants, and helpers.
 //!
-//! This module centralizes magic strings and protocol constants to reduce
-//! typo risk and improve maintainability.
+//! This module centralizes MCP protocol definitions including JSON-RPC types,
+//! method names, error codes, and other protocol constants.
+
+pub mod protocol;
+
+// Re-export protocol types for convenience
+#[allow(unused_imports, reason = "re-exports for public API consistency")]
+pub use protocol::{
+    JsonRpcEnvelope, JsonRpcError, JsonRpcErrorObject, JsonRpcRequest, JsonRpcResponse,
+};
 
 use core::fmt;
 use core::str::FromStr;

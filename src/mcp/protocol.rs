@@ -11,7 +11,7 @@
 //!
 //! ## Error Codes
 //!
-//! Standard JSON-RPC 2.0 error codes are defined in `src/main.rs`:
+//! Standard JSON-RPC 2.0 error codes are defined in the parent `mcp` module:
 //! - `-32700` - Parse error (invalid JSON)
 //! - `-32600` - Invalid request (malformed JSON-RPC)
 //! - `-32601` - Method not found
@@ -22,7 +22,7 @@
 //!
 //! ```rust
 //! use serde_json::json;
-//! # use bun_docs_mcp_proxy::protocol::JsonRpcResponse;
+//! # use bun_docs_mcp_proxy::mcp::protocol::JsonRpcResponse;
 //!
 //! // Success response
 //! let response = JsonRpcResponse::success(json!(1), json!({"result": "data"}));
@@ -31,8 +31,21 @@
 //! let error = JsonRpcResponse::error(json!(1), -32601, "Method not found".to_string());
 //! ```
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
+
+/// Custom deserializer that distinguishes between missing field and explicit null.
+/// - Missing field -> None
+/// - Explicit null -> `Some(Value::Null)`
+/// - Any other value -> `Some(value)`
+fn deserialize_optional_id<'de, D>(deserializer: D) -> Result<Option<Value>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // Deserialize the value - if present (even null), wrap in Some
+    let value = Value::deserialize(deserializer)?;
+    Ok(Some(value))
+}
 
 /// The fixed JSON-RPC 2.0 protocol version string.
 const JSONRPC_VERSION: &str = "2.0";
@@ -48,8 +61,9 @@ pub struct JsonRpcRequest {
     #[allow(dead_code, reason = "field required for protocol compliance")]
     pub jsonrpc: String,
     /// Request identifier (can be string, number, or null)
-    /// None indicates a notification (no response expected per JSON-RPC 2.0)
-    #[serde(default)]
+    /// None indicates a notification (no "id" field - no response expected per JSON-RPC 2.0)
+    /// `Some(Value::Null)` means "id": null was explicitly provided (requires response, though discouraged)
+    #[serde(default, deserialize_with = "deserialize_optional_id")]
     pub id: Option<Value>,
     /// Method name to invoke
     pub method: String,
@@ -605,5 +619,43 @@ mod tests {
         let err = error.unwrap();
         assert_eq!(err.code, -32601);
         assert_eq!(err.message, "Not found");
+    }
+
+    // JSON-RPC 2.0 compliance tests
+
+    #[test]
+    fn null_id_is_distinct_from_missing_id() {
+        // Request with id: null should have Some(Value::Null)
+        let with_null_id = r#"{"jsonrpc":"2.0","method":"test","id":null}"#;
+        let request: JsonRpcRequest = serde_json::from_str(with_null_id).unwrap();
+        assert!(request.id.is_some(), "id: null should be Some(Value::Null)");
+        assert_eq!(request.id, Some(serde_json::Value::Null));
+
+        // Request without id field should have None
+        let without_id = r#"{"jsonrpc":"2.0","method":"test"}"#;
+        let request: JsonRpcRequest = serde_json::from_str(without_id).unwrap();
+        assert!(request.id.is_none(), "missing id should be None");
+    }
+
+    #[test]
+    fn parse_error_response_has_null_id() {
+        // Per spec, parse errors MUST use id: null
+        let response = JsonRpcResponse::error(
+            serde_json::Value::Null,
+            -32_700_i32,
+            "Parse error".to_owned(),
+        );
+        let serialized = serde_json::to_value(&response).unwrap();
+        assert_eq!(serialized["id"], serde_json::Value::Null);
+        assert_eq!(serialized["error"]["code"], -32_700);
+    }
+
+    #[test]
+    fn request_with_null_id_gets_response_with_null_id() {
+        // Request with id: null should get a response with id: null
+        let response = JsonRpcResponse::success(serde_json::Value::Null, json!({"result": "ok"}));
+        let serialized = serde_json::to_value(&response).unwrap();
+        assert_eq!(serialized["id"], serde_json::Value::Null);
+        assert!(serialized["result"].is_object());
     }
 }

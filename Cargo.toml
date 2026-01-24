@@ -8,6 +8,14 @@ license     = "MIT"
 keywords    = ["bun", "documentation", "mcp", "protocol", "proxy"]
 categories  = ["command-line-utilities", "web-programming"]
 
+[lib]
+name = "bun_docs_mcp_proxy"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bun-docs-mcp-proxy"
+path = "src/bin/bun-docs-mcp-proxy.rs"
+
 [dependencies]
 anyhow             = "1"
 bytes              = "1"
