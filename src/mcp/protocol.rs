@@ -57,9 +57,11 @@ const JSONRPC_VERSION: &str = "2.0";
 /// - Notifications omit the `id` field entirely (no response expected)
 #[derive(Debug, Deserialize)]
 pub struct JsonRpcRequest {
-    /// Protocol version (must be "2.0")
-    #[allow(dead_code, reason = "field required for protocol compliance")]
-    pub jsonrpc: String,
+    /// Protocol version. Should be "2.0" but we accept any for proper error handling.
+    /// Per JSON-RPC 2.0 spec, missing/invalid jsonrpc field should return -32600 (Invalid Request),
+    /// not -32700 (Parse Error), so we make this optional and validate after parsing.
+    #[serde(default)]
+    pub jsonrpc: Option<String>,
     /// Request identifier (can be string, number, or null)
     /// None indicates a notification (no "id" field - no response expected per JSON-RPC 2.0)
     /// `Some(Value::Null)` means "id": null was explicitly provided (requires response, though discouraged)
@@ -327,7 +329,7 @@ mod tests {
 
         let request: JsonRpcRequest =
             serde_json::from_str(json_str).expect("valid JSON-RPC request should parse");
-        assert_eq!(request.jsonrpc, "2.0");
+        assert_eq!(request.jsonrpc, Some("2.0".to_owned()));
         assert_eq!(request.id, Some(json!(1_i32)));
         assert_eq!(request.method, "tools/list");
         assert!(request.params.is_some());
@@ -357,7 +359,7 @@ mod tests {
 
         let request: JsonRpcRequest =
             serde_json::from_str(json_str).expect("valid JSON-RPC notification should parse");
-        assert_eq!(request.jsonrpc, "2.0");
+        assert_eq!(request.jsonrpc, Some("2.0".to_owned()));
         assert!(request.id.is_none(), "notifications should have no id");
         assert_eq!(request.method, "notifications/initialized");
         assert!(request.params.is_none());
@@ -624,6 +626,22 @@ mod tests {
     // JSON-RPC 2.0 compliance tests
 
     #[test]
+    fn invalid_jsonrpc_version_parses_for_validation() {
+        // Invalid version should still parse (validation happens after)
+        let json = r#"{"jsonrpc":"1.0","id":1,"method":"test"}"#;
+        let request: JsonRpcRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.jsonrpc, Some("1.0".to_owned()));
+    }
+
+    #[test]
+    fn missing_jsonrpc_field_parses_as_none() {
+        // Missing jsonrpc should parse as None for proper error handling
+        let json = r#"{"id":1,"method":"test"}"#;
+        let request: JsonRpcRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.jsonrpc, None);
+    }
+
+    #[test]
     fn null_id_is_distinct_from_missing_id() {
         // Request with id: null should have Some(Value::Null)
         let with_null_id = r#"{"jsonrpc":"2.0","method":"test","id":null}"#;
@@ -657,5 +675,87 @@ mod tests {
         let serialized = serde_json::to_value(&response).unwrap();
         assert_eq!(serialized["id"], serde_json::Value::Null);
         assert!(serialized["result"].is_object());
+    }
+
+    // ============================================================================
+    // Protocol compliance tests (migrated from tests/integration_test.rs)
+    // ============================================================================
+
+    #[test]
+    fn protocol_types_roundtrip() {
+        // Test that JSON-RPC types can be serialized and deserialized correctly
+        let request_json = json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/list",
+            "params": {"query": "test"}
+        });
+
+        let request_str = serde_json::to_string(&request_json).expect("serialization succeeds");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&request_str).expect("deserialization succeeds");
+
+        assert_eq!(parsed.get("jsonrpc").expect("jsonrpc field exists"), "2.0");
+        assert_eq!(
+            parsed.get("method").expect("method field exists"),
+            "tools/list"
+        );
+    }
+
+    #[test]
+    fn standard_error_codes_valid() {
+        // Verify standard JSON-RPC error codes
+        let error_codes = vec![
+            (-32_700_i32, "Parse error"),
+            (-32_601_i32, "Method not found"),
+            (-32_603_i32, "Internal error"),
+        ];
+
+        for (code, _message) in error_codes {
+            assert!(code < 0_i32, "Error codes should be negative");
+            assert!(code >= -0x8000_i32, "Error codes should be in valid range");
+        }
+    }
+
+    #[test]
+    fn jsonrpc_version_is_2_0() {
+        // Ensure all responses use JSON-RPC 2.0
+        assert_eq!(JSONRPC_VERSION, "2.0");
+    }
+
+    #[test]
+    fn numeric_and_string_ids_valid() {
+        // Test that both numeric and string IDs are valid
+        let numeric_id = json!(42_i32);
+        let string_id = json!("abc-123");
+        let null_id = json!(null);
+
+        assert!(numeric_id.is_number());
+        assert!(string_id.is_string());
+        assert!(null_id.is_null());
+
+        // All should be valid JSON-RPC IDs
+        assert!(numeric_id.is_number() || numeric_id.is_string() || numeric_id.is_null());
+        assert!(string_id.is_number() || string_id.is_string() || string_id.is_null());
+        assert!(null_id.is_number() || null_id.is_string() || null_id.is_null());
+    }
+
+    #[test]
+    fn error_response_preserves_request_id() {
+        // Test that error responses preserve request ID
+        let request_id = json!("test-123");
+        let error_response = json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {
+                "code": -32_601_i32,
+                "message": "Method not found"
+            }
+        });
+
+        assert_eq!(
+            error_response.get("id").expect("id field exists"),
+            "test-123"
+        );
     }
 }

@@ -517,7 +517,7 @@ mod tests {
         let client =
             http::BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
         let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_owned(),
+            jsonrpc: Some("2.0".to_owned()),
             id: Some(json!(1)),
             method: "tools/call".to_owned(),
             params: Some(json!({
@@ -560,7 +560,7 @@ mod tests {
         let client =
             http::BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
         let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_owned(),
+            jsonrpc: Some("2.0".to_owned()),
             id: Some(json!("res-mock")),
             method: "resources/read".to_owned(),
             params: Some(json!({"uri": "bun://docs?query=HTTP"})),
@@ -590,7 +590,7 @@ mod tests {
     async fn test_handle_tools_call_real_api() {
         let client = http::BunDocsClient::new();
         let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_owned(),
+            jsonrpc: Some("2.0".to_owned()),
             id: Some(json!(1)),
             method: "tools/call".to_owned(),
             params: Some(json!({
@@ -616,7 +616,7 @@ mod tests {
         // If Bun changes this behavior (e.g., returns docs overview), update expected output accordingly.
         let client = http::BunDocsClient::new();
         let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_owned(),
+            jsonrpc: Some("2.0".to_owned()),
             id: Some(json!(2)),
             method: "tools/call".to_owned(),
             params: Some(json!({
@@ -639,7 +639,7 @@ mod tests {
     async fn test_handle_resources_read_with_query() {
         let client = http::BunDocsClient::new();
         let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_owned(),
+            jsonrpc: Some("2.0".to_owned()),
             id: Some(json!("res1")),
             method: "resources/read".to_owned(),
             params: Some(json!({"uri": "bun://docs?query=Bun.serve"})),
@@ -663,7 +663,7 @@ mod tests {
         // If Bun changes to return overview/help for empty query, this test still passes (valid contents array).
         let client = http::BunDocsClient::new();
         let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_owned(),
+            jsonrpc: Some("2.0".to_owned()),
             id: Some(json!("res2")),
             method: "resources/read".to_owned(),
             params: Some(json!({"uri": "bun://docs"})),
@@ -679,7 +679,7 @@ mod tests {
     async fn test_handle_resources_read_missing_params() {
         let client = http::BunDocsClient::new();
         let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_owned(),
+            jsonrpc: Some("2.0".to_owned()),
             id: Some(json!("res3")),
             method: "resources/read".to_owned(),
             params: None,
@@ -702,7 +702,7 @@ mod tests {
     async fn test_handle_resources_read_invalid_uri() {
         let client = http::BunDocsClient::new();
         let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_owned(),
+            jsonrpc: Some("2.0".to_owned()),
             id: Some(json!("res4")),
             method: "resources/read".to_owned(),
             params: Some(json!({"uri": "invalid://uri"})),
@@ -725,7 +725,7 @@ mod tests {
     async fn test_handle_resources_read_missing_uri_param() {
         let client = http::BunDocsClient::new();
         let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_owned(),
+            jsonrpc: Some("2.0".to_owned()),
             id: Some(json!("res5")),
             method: "resources/read".to_owned(),
             params: Some(json!({"other": "value"})),
@@ -749,7 +749,7 @@ mod tests {
     async fn test_handle_resources_read_with_real_search() {
         let client = http::BunDocsClient::new();
         let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_owned(),
+            jsonrpc: Some("2.0".to_owned()),
             id: Some(json!("res6")),
             method: "resources/read".to_owned(),
             params: Some(json!({"uri": "bun://docs?query=HTTP"})),
@@ -802,7 +802,7 @@ mod tests {
         let client =
             http::BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
         let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_owned(),
+            jsonrpc: Some("2.0".to_owned()),
             id: Some(json!(1)),
             method: "tools/call".to_owned(),
             params: Some(json!({
@@ -906,5 +906,240 @@ mod tests {
         let json = r#"{"jsonrpc":"2.0","id":-42,"method":"test"}"#;
         let id = extract_id_from_json(json);
         assert_eq!(id, json!(-42));
+    }
+
+    // ============================================================================
+    // MCP response structure tests (migrated from tests/integration_test.rs)
+    // ============================================================================
+
+    #[test]
+    fn initialize_response_has_required_mcp_fields() {
+        // Test that initialize response has required MCP fields
+        let response = handle_initialize(json!(1));
+        let serialized = serde_json::to_value(&response).unwrap();
+        let init_result = &serialized["result"];
+
+        assert!(init_result["protocolVersion"].is_string());
+        assert!(init_result["capabilities"].is_object());
+        assert!(init_result["serverInfo"]["name"].is_string());
+        assert!(init_result["serverInfo"]["version"].is_string());
+    }
+
+    #[test]
+    fn tools_list_response_follows_mcp_schema() {
+        // Test that tools/list response follows MCP schema
+        let response = handle_tools_list(json!(1));
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        let tools = serialized["result"]
+            .get("tools")
+            .expect("tools field exists")
+            .as_array()
+            .expect("tools is array");
+        assert_eq!(tools.len(), 1_usize);
+
+        let tool = tools.first().expect("tools array non-empty");
+        assert!(tool.get("name").expect("name field exists").is_string());
+        assert!(
+            tool.get("description")
+                .expect("description field exists")
+                .is_string()
+        );
+        assert!(
+            tool.get("inputSchema")
+                .expect("inputSchema field exists")
+                .is_object()
+        );
+        assert_eq!(
+            tool.get("inputSchema")
+                .expect("inputSchema exists")
+                .get("type")
+                .expect("type field exists"),
+            "object"
+        );
+        assert!(
+            tool.get("inputSchema")
+                .expect("inputSchema exists")
+                .get("properties")
+                .expect("properties field exists")
+                .is_object()
+        );
+        assert!(
+            tool.get("inputSchema")
+                .expect("inputSchema exists")
+                .get("required")
+                .expect("required field exists")
+                .is_array()
+        );
+    }
+
+    #[test]
+    fn resources_list_response_follows_mcp_schema() {
+        // Test that resources/list response follows MCP schema
+        let response = handle_resources_list(json!(1));
+        let serialized = serde_json::to_value(&response).unwrap();
+
+        let resources = serialized["result"]
+            .get("resources")
+            .expect("resources field exists")
+            .as_array()
+            .expect("resources is array");
+        assert_eq!(resources.len(), 1_usize);
+
+        let resource = resources.first().expect("resources array non-empty");
+        assert_eq!(resource.get("uri").expect("uri field exists"), "bun://docs");
+        assert!(resource.get("name").expect("name field exists").is_string());
+        assert!(
+            resource
+                .get("description")
+                .expect("description field exists")
+                .is_string()
+        );
+        assert_eq!(
+            resource.get("mimeType").expect("mimeType field exists"),
+            "application/json"
+        );
+    }
+
+    #[test]
+    fn resources_read_response_structure_valid() {
+        // Test that resources/read response follows MCP schema
+        let read_response = json!({
+            "contents": [{
+                "uri": "bun://docs?query=test",
+                "mimeType": "application/json",
+                "text": "{\"result\": {}}"
+            }]
+        });
+
+        let contents = read_response
+            .get("contents")
+            .expect("contents field exists")
+            .as_array()
+            .expect("contents is array");
+        assert_eq!(contents.len(), 1_usize);
+
+        let content = contents.first().expect("contents array non-empty");
+        assert!(content.get("uri").expect("uri field exists").is_string());
+        assert_eq!(
+            content.get("mimeType").expect("mimeType field exists"),
+            "application/json"
+        );
+        assert!(content.get("text").expect("text field exists").is_string());
+    }
+
+    #[test]
+    fn unsupported_method_error_follows_jsonrpc_spec() {
+        // Test that unsupported method errors follow JSON-RPC spec
+        use crate::mcp::error_code;
+
+        let error_response = JsonRpcResponse::error(
+            json!(1),
+            error_code::METHOD_NOT_FOUND,
+            "Method not found: unsupported_method".to_owned(),
+        );
+        let serialized = serde_json::to_value(&error_response).unwrap();
+
+        assert_eq!(
+            serialized.get("jsonrpc").expect("jsonrpc field exists"),
+            "2.0"
+        );
+        assert!(
+            serialized
+                .get("error")
+                .expect("error field exists")
+                .is_object()
+        );
+        assert_eq!(
+            serialized
+                .get("error")
+                .expect("error exists")
+                .get("code")
+                .expect("code field exists"),
+            -32_601_i32
+        );
+        assert!(
+            serialized
+                .get("error")
+                .expect("error exists")
+                .get("message")
+                .expect("message field exists")
+                .as_str()
+                .expect("message is string")
+                .contains("Method not found")
+        );
+    }
+
+    #[test]
+    fn parse_error_follows_jsonrpc_spec() {
+        // Test that parse errors follow JSON-RPC spec
+        use crate::mcp::error_code;
+
+        let error_response = JsonRpcResponse::error(
+            json!(null),
+            error_code::PARSE_ERROR,
+            "Parse error: invalid JSON".to_owned(),
+        );
+        let serialized = serde_json::to_value(&error_response).unwrap();
+
+        assert_eq!(
+            serialized.get("jsonrpc").expect("jsonrpc field exists"),
+            "2.0"
+        );
+        assert!(serialized.get("id").expect("id field exists").is_null());
+        assert_eq!(
+            serialized
+                .get("error")
+                .expect("error exists")
+                .get("code")
+                .expect("code field exists"),
+            -32_700_i32
+        );
+        assert!(
+            serialized
+                .get("error")
+                .expect("error exists")
+                .get("message")
+                .expect("message field exists")
+                .as_str()
+                .expect("message is string")
+                .contains("Parse error")
+        );
+    }
+
+    #[test]
+    fn internal_error_follows_jsonrpc_spec() {
+        // Test that internal errors follow JSON-RPC spec
+        use crate::mcp::error_code;
+
+        let error_response = JsonRpcResponse::error(
+            json!(1),
+            error_code::INTERNAL_ERROR,
+            "Internal error: failed to process request".to_owned(),
+        );
+        let serialized = serde_json::to_value(&error_response).unwrap();
+
+        assert_eq!(
+            serialized.get("jsonrpc").expect("jsonrpc field exists"),
+            "2.0"
+        );
+        assert_eq!(
+            serialized
+                .get("error")
+                .expect("error exists")
+                .get("code")
+                .expect("code field exists"),
+            -32_603_i32
+        );
+        assert!(
+            serialized
+                .get("error")
+                .expect("error exists")
+                .get("message")
+                .expect("message field exists")
+                .as_str()
+                .expect("message is string")
+                .contains("Internal error")
+        );
     }
 }

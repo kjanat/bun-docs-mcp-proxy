@@ -3,5 +3,14 @@
     { "external": { "command": "dprint", "arguments": ["fmt", "--stdin", "{buffer_path}"] } }
   ],
   "prettier": { "allowed": false },
-  "languages": { "YAML": { "wrap_guides": [120] }, "Rust": { "wrap_guides": [100] } }
+  "languages": { "YAML": { "wrap_guides": [120] }, "Rust": { "wrap_guides": [100] } },
+  "lsp": {
+    "rust-analyzer": {
+      "initialization_options": {
+        "cargo": {
+          "features": "all"
+        }
+      }
+    }
+  }
 }

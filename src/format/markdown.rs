@@ -3,14 +3,19 @@
 use super::extract_doc_entries;
 use crate::upstream::bun_docs::BunDocsClient;
 use anyhow::Result;
-use core::fmt::Write as _;
+
+use futures::stream::{self, StreamExt as _};
 use tracing::warn;
+
+/// Maximum number of concurrent MDX fetch requests.
+const MAX_CONCURRENT_FETCHES: usize = 4;
 
 /// Formats a search result as a Markdown string by fetching the raw MDX content from URLs.
 ///
 /// This function extracts `DocEntry` items from the search result. For each entry with a URL,
-/// it attempts to fetch the full MDX content. If successful, the content is included with a source
-/// comment. If the fetch fails or no URL is present, it falls back to the entry's text.
+/// it attempts to fetch the full MDX content concurrently (up to 4 parallel requests).
+/// If successful, the content is included with a source comment. If the fetch fails or no URL
+/// is present, it falls back to the entry's text.
 /// The final output joins all parts with Markdown horizontal rules.
 ///
 /// # Arguments
@@ -35,34 +40,38 @@ pub async fn format_markdown(result: &serde_json::Value, client: &BunDocsClient)
         return Ok(output);
     }
 
-    let mut mdx_parts = Vec::new();
+    // Fetch MDX content concurrently with index tracking to preserve order
+    let indexed_results: Vec<(usize, String)> = stream::iter(doc_entries.into_iter().enumerate())
+        .map(|(idx, entry)| async move {
+            let part = if let Some(url) = entry.url {
+                // Try to fetch MDX from the URL
+                match client.fetch_doc_markdown(&url).await {
+                    Ok(mdx) => {
+                        // Success: include URL comment and MDX content
+                        format!("<!-- Source: {url} -->\n\n{mdx}")
+                    }
+                    Err(e) => {
+                        // Error: include error comment and fallback to original text
+                        warn!("Failed to fetch MDX from {url}: {e}");
+                        format!("<!-- Error: {e} -->\n\n{}", entry.text)
+                    }
+                }
+            } else {
+                // No URL found, use original text content
+                entry.text.to_owned()
+            };
+            (idx, part)
+        })
+        .buffer_unordered(MAX_CONCURRENT_FETCHES)
+        .collect()
+        .await;
 
-    for entry in doc_entries {
-        if let Some(url) = entry.url {
-            // Try to fetch MDX from the URL
-            let fetch_result = client.fetch_doc_markdown(&url).await;
-            match fetch_result {
-                Ok(mdx) => {
-                    // Success: include URL comment and MDX content
-                    let mut part = String::new();
-                    write!(part, "<!-- Source: {url} -->\n\n")?;
-                    part.push_str(&mdx);
-                    mdx_parts.push(part);
-                }
-                Err(e) => {
-                    // Error: include error comment and fallback to original text
-                    warn!("Failed to fetch MDX from {url}: {e}");
-                    let mut part = String::new();
-                    write!(part, "<!-- Error: {e} -->\n\n")?;
-                    part.push_str(entry.text);
-                    mdx_parts.push(part);
-                }
-            }
-        } else {
-            // No URL found, use original text content
-            mdx_parts.push(entry.text.to_owned());
-        }
-    }
+    // Sort by original index to preserve entry order
+    let mut sorted_results = indexed_results;
+    sorted_results.sort_by_key(|(idx, _)| *idx);
+
+    // Extract just the parts in order
+    let mdx_parts: Vec<String> = sorted_results.into_iter().map(|(_, part)| part).collect();
 
     // Join with horizontal rules and two newlines
     Ok(mdx_parts.join("\n\n---\n\n"))
@@ -128,35 +137,25 @@ mod tests {
 
     #[tokio::test]
     async fn test_format_markdown_fetch_mdx_error_with_fallback() {
-        // Test that when MDX fetch fails, we get an error comment + fallback text
-        let mut server = mockito::Server::new_async().await;
-
-        // Mock the MDX fetch to fail with 500
-        let mock_error = server
-            .mock("GET", mockito::Matcher::Any)
-            .with_status(500_usize)
-            .with_body("Internal Server Error")
-            .expect(1_usize)
-            .create_async()
-            .await;
-
+        // Test that when MDX fetch fails (SSRF rejection for non-bun URL), we get error + fallback
         let result = json!({"content": [{
-            "text": format!("Original text content\nLink: {}/docs/page", server.url()),
+            "text": "Original text content\nLink: https://evil.com/docs/page",
             "type": "text"
         }]});
 
-        let client = BunDocsClient::with_base_url(&server.url()).expect("valid URL");
+        let client = BunDocsClient::new();
         let formatted = format_markdown(&result, &client)
             .await
             .expect("format should succeed");
 
-        mock_error.assert_async().await;
-        drop(server);
-
-        // Verify error comment and fallback text
+        // Verify error comment (SSRF rejection) and fallback text
         assert!(
             formatted.contains("<!-- Error:"),
             "Should have error comment when fetch fails"
+        );
+        assert!(
+            formatted.contains("non-bun"),
+            "Error should mention SSRF rejection"
         );
         assert!(
             formatted.contains("Original text content"),
@@ -165,47 +164,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_format_markdown_with_url_and_fetch_success() {
-        // Test happy path: URL is parsed and MDX is fetched successfully
-        let mut server = mockito::Server::new_async().await;
-
-        // Mock successful MDX fetch
-        let mock = server
-            .mock("GET", "/docs/page")
-            .match_header("accept", "text/markdown")
-            .with_status(200_usize)
-            .with_header("content-type", "text/markdown")
-            .with_body("# Documentation\n\nThis is the actual MDX content")
-            .expect(1_usize)
-            .create_async()
-            .await;
-
-        let url = format!("{}/docs/page", server.url());
+    async fn test_format_markdown_ssrf_rejection_http_scheme() {
+        // Test that http:// URLs are rejected with fallback
         let result = json!({"content": [{
-            "text": format!("Summary\nLink: {url}"),
+            "text": "Some docs\nLink: http://bun.com/docs/page",
             "type": "text"
         }]});
 
-        let client = BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
+        let client = BunDocsClient::new();
         let formatted = format_markdown(&result, &client)
             .await
             .expect("format should succeed");
 
-        mock.assert_async().await;
-        drop(server);
-
-        // Verify source comment and MDX content
         assert!(
-            formatted.contains("<!-- Source:"),
-            "Should have source comment when fetch succeeds"
+            formatted.contains("<!-- Error:"),
+            "Should have error comment for http URL"
         );
         assert!(
-            formatted.contains("# Documentation"),
-            "Should include fetched MDX content"
+            formatted.contains("non-https"),
+            "Error should mention https requirement"
         );
         assert!(
-            formatted.contains("actual MDX content"),
-            "Should preserve full MDX content"
+            formatted.contains("Some docs"),
+            "Should include fallback text"
         );
     }
 }

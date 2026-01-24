@@ -18,7 +18,7 @@
 use crate::mcp::{JsonRpcEnvelope, content_type};
 use crate::util::truncate_utf8;
 use anyhow::{Context as _, Result};
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use eventsource_stream::Eventsource as _;
 use futures::StreamExt as _;
 use reqwest::{Client, StatusCode, Url, header::HeaderMap};
@@ -330,6 +330,41 @@ impl BunDocsClient {
         Duration::from_millis(delay_ms.min(max_ms))
     }
 
+    /// Reads response body with a size limit, streaming chunks to avoid buffering entire response.
+    ///
+    /// This prevents OOM attacks from malicious servers sending huge responses.
+    /// Reading stops as soon as `limit` bytes have been accumulated.
+    ///
+    /// # Arguments
+    /// * `response` - The HTTP response to read from.
+    /// * `limit` - Maximum number of bytes to read.
+    ///
+    /// # Returns
+    /// The accumulated bytes, truncated at `limit`.
+    #[allow(clippy::indexing_slicing, reason = "slice bounds checked above")]
+    async fn read_body_limited(response: reqwest::Response, limit: usize) -> Bytes {
+        let mut buf = BytesMut::new();
+        let mut stream = response.bytes_stream();
+        while let Some(chunk_result) = stream.next().await {
+            match chunk_result {
+                Ok(chunk) => {
+                    let remaining = limit.saturating_sub(buf.len());
+                    if remaining == 0 {
+                        break;
+                    }
+                    if chunk.len() <= remaining {
+                        buf.extend_from_slice(&chunk);
+                    } else {
+                        buf.extend_from_slice(&chunk[..remaining]);
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        buf.freeze()
+    }
+
     /// Determines if an HTTP status code indicates a transient error that is worth retrying.
     ///
     /// Transient errors typically include server errors (5xx) and rate limiting (429).
@@ -489,15 +524,10 @@ impl BunDocsClient {
                         }
                         return UpstreamResponse::from_json(json_value);
                     }
-                    // Read body (truncated) for context
-                    let bytes = response.bytes().await.unwrap_or_else(|error| {
-                        warn!("Failed to read error response body: {}", error);
-                        Bytes::default()
-                    });
-                    let limited_bytes: &[u8] = bytes
-                        .get(..self.config.max_error_body_size)
-                        .unwrap_or(&bytes);
-                    let body = String::from_utf8_lossy(limited_bytes);
+                    // Read body with streaming limit to prevent OOM from malicious servers
+                    let bytes =
+                        Self::read_body_limited(response, self.config.max_error_body_size).await;
+                    let body = String::from_utf8_lossy(&bytes);
                     let body_snippet = truncate_utf8(&body, self.config.max_error_snippet_size);
                     let header_summary = Self::summarize_headers(&headers);
 
@@ -561,6 +591,9 @@ impl BunDocsClient {
     /// `message` or `completion` events that contain a complete JSON-RPC response.
     /// It stops processing after the first valid JSON-RPC response is found.
     ///
+    /// A deadline is enforced to prevent indefinite hangs if the server sends
+    /// heartbeats but never delivers a JSON-RPC envelope.
+    ///
     /// # Arguments
     /// * `response` - The `reqwest::Response` object, expected to contain an SSE stream.
     ///
@@ -575,8 +608,20 @@ impl BunDocsClient {
     /// - No valid JSON-RPC response (i.e., an object with a `result` or `error` field)
     ///   is found within the stream.
     /// - JSON parsing of an SSE event's data fails.
+    /// - The configured timeout expires before a valid JSON-RPC envelope is received.
     #[instrument(name = "sse_parse", skip(self, response))]
     async fn parse_sse_response(&self, response: reqwest::Response) -> Result<Value> {
+        let timeout_duration = self.config.timeout;
+
+        tokio::time::timeout(timeout_duration, self.parse_sse_response_inner(response))
+            .await
+            .map_err(|_elapsed| {
+                anyhow::anyhow!("Timed out waiting for JSON-RPC envelope in SSE stream")
+            })?
+    }
+
+    /// Inner SSE parsing logic without timeout wrapper.
+    async fn parse_sse_response_inner(&self, response: reqwest::Response) -> Result<Value> {
         let mut event_stream = response.bytes_stream().eventsource();
         let mut json_response: Option<Value> = None;
 
@@ -632,6 +677,26 @@ impl BunDocsClient {
         json_response.ok_or_else(|| anyhow::anyhow!("No valid JSON-RPC response in SSE stream"))
     }
 
+    /// Validates that a URL is safe to fetch for markdown content.
+    ///
+    /// SSRF protection: only allows HTTPS scheme and trusted hosts (bun.com, bun.sh).
+    ///
+    /// # Errors
+    /// Returns an error if the URL:
+    /// - Cannot be parsed
+    /// - Uses a non-HTTPS scheme
+    /// - Points to an untrusted host
+    fn validate_markdown_url(url: &str) -> Result<()> {
+        let parsed = Url::parse(url).context("Invalid URL")?;
+        if parsed.scheme() != "https" {
+            anyhow::bail!("Refusing non-https markdown fetch: {url}");
+        }
+        if !matches!(parsed.host_str(), Some("bun.com" | "bun.sh")) {
+            anyhow::bail!("Refusing non-bun markdown fetch: {url}");
+        }
+        Ok(())
+    }
+
     /// Fetch a documentation page as raw Markdown/MDX
     ///
     /// Sends an HTTP GET request with `Accept: text/markdown` header to retrieve
@@ -651,6 +716,9 @@ impl BunDocsClient {
     #[instrument(name = "fetch_mdx", skip(self), fields(url = %url))]
     pub async fn fetch_doc_markdown(&self, url: &str) -> Result<String> {
         debug!("Fetching MDX for URL: {}", url);
+
+        // SSRF protection: only allow trusted hosts
+        Self::validate_markdown_url(url)?;
 
         let response = self
             .client
@@ -675,6 +743,31 @@ impl BunDocsClient {
 
         debug!("Successfully fetched {} bytes of MDX", text.len());
         Ok(text)
+    }
+
+    /// Internal fetch without URL validation - for testing HTTP behavior only.
+    #[cfg(test)]
+    async fn fetch_doc_markdown_unchecked(&self, url: &str) -> Result<String> {
+        let response = self
+            .client
+            .get(url)
+            .header(reqwest::header::ACCEPT, content_type::MARKDOWN)
+            .timeout(self.config.timeout)
+            .send()
+            .await
+            .context("Failed to send request for markdown")?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(anyhow::anyhow!(
+                "Failed to fetch markdown: HTTP {status} for URL: {url}"
+            ));
+        }
+
+        response
+            .text()
+            .await
+            .context("Failed to read markdown response body")
     }
 }
 
@@ -1375,7 +1468,8 @@ mod tests {
         let client = BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
         let url = format!("{}/docs/page", server.url());
 
-        let result = client.fetch_doc_markdown(&url).await;
+        // Use unchecked variant to test HTTP behavior without SSRF validation
+        let result = client.fetch_doc_markdown_unchecked(&url).await;
 
         mock.assert_async().await;
         drop(server);
@@ -1400,7 +1494,8 @@ mod tests {
         let client = BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
         let url = format!("{}/docs/missing", server.url());
 
-        let result = client.fetch_doc_markdown(&url).await;
+        // Use unchecked variant to test HTTP behavior without SSRF validation
+        let result = client.fetch_doc_markdown_unchecked(&url).await;
 
         mock.assert_async().await;
         drop(server);
@@ -1424,12 +1519,507 @@ mod tests {
         let client = BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
         let url = format!("{}/docs/error", server.url());
 
-        let result = client.fetch_doc_markdown(&url).await;
+        // Use unchecked variant to test HTTP behavior without SSRF validation
+        let result = client.fetch_doc_markdown_unchecked(&url).await;
 
         mock.assert_async().await;
         drop(server);
         assert!(result.is_err());
         let error = result.expect_err("should be 500 error");
         assert!(error.to_string().contains("500"));
+    }
+
+    // SSRF protection tests
+    #[tokio::test]
+    async fn fetch_doc_markdown_rejects_http_scheme() {
+        let client = BunDocsClient::new();
+        let result = client.fetch_doc_markdown("http://bun.com/docs/page").await;
+
+        assert!(result.is_err());
+        let error = result.expect_err("should reject http");
+        assert!(error.to_string().contains("non-https"));
+    }
+
+    #[tokio::test]
+    async fn fetch_doc_markdown_rejects_untrusted_host() {
+        let client = BunDocsClient::new();
+        let result = client
+            .fetch_doc_markdown("https://evil.com/docs/page")
+            .await;
+
+        assert!(result.is_err());
+        let error = result.expect_err("should reject untrusted host");
+        assert!(error.to_string().contains("non-bun"));
+    }
+
+    #[tokio::test]
+    async fn fetch_doc_markdown_rejects_localhost() {
+        let client = BunDocsClient::new();
+        let result = client
+            .fetch_doc_markdown("https://localhost:8080/secret")
+            .await;
+
+        assert!(result.is_err());
+        let error = result.expect_err("should reject localhost");
+        assert!(error.to_string().contains("non-bun"));
+    }
+
+    #[tokio::test]
+    async fn fetch_doc_markdown_rejects_internal_ip() {
+        let client = BunDocsClient::new();
+        let result = client.fetch_doc_markdown("https://192.168.1.1/admin").await;
+
+        assert!(result.is_err());
+        let error = result.expect_err("should reject internal IP");
+        assert!(error.to_string().contains("non-bun"));
+    }
+
+    #[tokio::test]
+    async fn fetch_doc_markdown_rejects_file_scheme() {
+        let client = BunDocsClient::new();
+        let result = client.fetch_doc_markdown("file:///etc/passwd").await;
+
+        assert!(result.is_err());
+        let error = result.expect_err("should reject file scheme");
+        assert!(error.to_string().contains("non-https"));
+    }
+
+    #[tokio::test]
+    async fn fetch_doc_markdown_rejects_invalid_url() {
+        let client = BunDocsClient::new();
+        let result = client.fetch_doc_markdown("not a valid url").await;
+
+        assert!(result.is_err());
+        let error = result.expect_err("should reject invalid URL");
+        assert!(error.to_string().contains("Invalid URL"));
+    }
+
+    #[tokio::test]
+    async fn fetch_doc_markdown_allows_bun_sh() {
+        // bun.sh should be allowed (but will fail with network error in test)
+        let client = BunDocsClient::builder()
+            .timeout(Duration::from_millis(100_u64))
+            .build();
+        let result = client.fetch_doc_markdown("https://bun.sh/docs/page").await;
+
+        // Should not be rejected by SSRF check - will fail for other reasons
+        if let Err(e) = &result {
+            let msg = e.to_string();
+            assert!(
+                !msg.contains("non-https") && !msg.contains("non-bun"),
+                "bun.sh should pass SSRF check, got: {msg}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn read_body_limited_truncates_large_response() {
+        let mut server = mockito::Server::new_async().await;
+
+        // Create a 10KB body but limit to 100 bytes
+        let large_body = "x".repeat(10_000_usize);
+        let mock = server
+            .mock("GET", "/large")
+            .with_status(200_usize)
+            .with_body(&large_body)
+            .expect(1_usize)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let response = client
+            .get(format!("{}/large", server.url()))
+            .send()
+            .await
+            .expect("request should succeed");
+
+        let bytes = BunDocsClient::read_body_limited(response, 100_usize).await;
+
+        mock.assert_async().await;
+        drop(server);
+        assert_eq!(bytes.len(), 100_usize, "Should truncate to limit");
+        assert!(bytes.iter().all(|&b| b == b'x'), "Content should be x's");
+    }
+
+    #[tokio::test]
+    async fn read_body_limited_returns_full_small_response() {
+        let mut server = mockito::Server::new_async().await;
+
+        let small_body = "hello world";
+        let mock = server
+            .mock("GET", "/small")
+            .with_status(200_usize)
+            .with_body(small_body)
+            .expect(1_usize)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let response = client
+            .get(format!("{}/small", server.url()))
+            .send()
+            .await
+            .expect("request should succeed");
+
+        let bytes = BunDocsClient::read_body_limited(response, 1000_usize).await;
+
+        mock.assert_async().await;
+        drop(server);
+        assert_eq!(bytes.len(), small_body.len(), "Should return full body");
+        assert_eq!(&bytes[..], small_body.as_bytes());
+    }
+
+    #[tokio::test]
+    async fn read_body_limited_zero_limit() {
+        let mut server = mockito::Server::new_async().await;
+
+        let mock = server
+            .mock("GET", "/zero")
+            .with_status(200_usize)
+            .with_body("some content")
+            .expect(1_usize)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let response = client
+            .get(format!("{}/zero", server.url()))
+            .send()
+            .await
+            .expect("request should succeed");
+
+        let bytes = BunDocsClient::read_body_limited(response, 0_usize).await;
+
+        mock.assert_async().await;
+        drop(server);
+        assert!(bytes.is_empty(), "Zero limit should return empty");
+    }
+
+    #[tokio::test]
+    async fn sse_parsing_timeout_on_endless_heartbeats() {
+        let mut server = mockito::Server::new_async().await;
+
+        // SSE stream that sends heartbeats but never a JSON-RPC envelope
+        // The `:` prefix indicates a comment/heartbeat in SSE
+        let sse_body = ": heartbeat\n\n: heartbeat\n\n: heartbeat\n\n";
+
+        let mock = server
+            .mock("POST", "/")
+            .with_status(200_usize)
+            .with_header("content-type", "text/event-stream")
+            .with_body(sse_body)
+            .expect(1_usize)
+            .create_async()
+            .await;
+
+        // Use a very short timeout to make test fast
+        let client = BunDocsClient::builder()
+            .base_url(&server.url())
+            .expect("valid mock server URL")
+            .timeout(Duration::from_millis(100_u64))
+            .build();
+
+        let request = json!({"jsonrpc":"2.0","method":"test","id":1});
+
+        let start = Instant::now();
+        let result = client.forward_request(request).await;
+        let elapsed = start.elapsed();
+
+        mock.assert_async().await;
+        drop(server);
+
+        // Should fail with timeout error
+        assert!(result.is_err(), "Should timeout on endless heartbeats");
+        let error = result.expect_err("should be timeout error");
+        let error_msg = error.to_string();
+        // Could be "Timed out waiting for JSON-RPC envelope" or "No valid JSON-RPC response"
+        // depending on whether timeout fires first or stream ends first
+        assert!(
+            error_msg.contains("Timed out") || error_msg.contains("No valid JSON-RPC"),
+            "Expected timeout or no response error, got: {error_msg}"
+        );
+
+        // Should complete quickly (within timeout + small margin)
+        assert!(
+            elapsed.as_millis() < 500_u128,
+            "Should not hang, elapsed: {}ms",
+            elapsed.as_millis()
+        );
+    }
+
+    #[tokio::test]
+    async fn sse_parsing_succeeds_before_timeout() {
+        let mut server = mockito::Server::new_async().await;
+
+        // SSE stream with valid JSON-RPC response
+        let sse_body = "data: {\"jsonrpc\":\"2.0\",\"result\":{\"data\":\"test\"},\"id\":1}\n\n";
+
+        let mock = server
+            .mock("POST", "/")
+            .with_status(200_usize)
+            .with_header("content-type", "text/event-stream")
+            .with_body(sse_body)
+            .expect(1_usize)
+            .create_async()
+            .await;
+
+        let client = BunDocsClient::builder()
+            .base_url(&server.url())
+            .expect("valid mock server URL")
+            .timeout(Duration::from_secs(5_u64))
+            .build();
+
+        let request = json!({"jsonrpc":"2.0","method":"test","id":1});
+        let result = client.forward_request(request).await;
+
+        mock.assert_async().await;
+        drop(server);
+
+        assert!(result.is_ok(), "Should succeed with valid SSE response");
+        let upstream = result.expect("successful response");
+        assert!(upstream.is_ok(), "Should be UpstreamResponse::Ok");
+    }
+
+    // ==========================================================================
+    // HTTP Edge Case Tests (integration-tests feature)
+    // Network tests that hit real hosts (httpbingo.org, DNS failure tests, etc.)
+    // Run with: cargo test --features integration-tests
+    // ==========================================================================
+
+    #[cfg(feature = "integration-tests")]
+    mod edge_cases {
+        use super::*;
+        use std::io::{Error, ErrorKind::Other};
+
+        #[tokio::test]
+        async fn forward_request_connection_refused() {
+            // Use invalid port that nothing is listening on
+            let client = BunDocsClient::with_base_url("http://localhost:1").expect("valid URL");
+
+            let request = json!({
+                "jsonrpc": "2.0",
+                "id": 1_i32,
+                "method": "tools/list"
+            });
+
+            let result = client.forward_request(request).await;
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                error_msg.contains("Failed to send request")
+                    || error_msg.contains("connection")
+                    || error_msg.contains("refused")
+                    || error_msg.contains("Connection refused")
+            );
+        }
+
+        #[tokio::test]
+        async fn forward_request_invalid_hostname() {
+            // Use invalid hostname that cannot be resolved
+            let client =
+                BunDocsClient::with_base_url("http://invalid.hostname.that.does.not.exist.local")
+                    .expect("valid URL");
+
+            let request = json!({
+                "jsonrpc": "2.0",
+                "id": 1_i32,
+                "method": "tools/list"
+            });
+
+            let result = client.forward_request(request).await;
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                error_msg.contains("Failed to send request")
+                    || error_msg.contains("dns")
+                    || error_msg.contains("resolve")
+            );
+        }
+
+        #[tokio::test]
+        async fn forward_request_timeout_with_real_slow_endpoint() {
+            // Use httpbingo.org delay endpoint to test timeout (delays 10s, timeout is 5s)
+            let client =
+                BunDocsClient::with_base_url("https://httpbingo.org/delay/10").expect("valid URL");
+
+            let request = json!({
+                "jsonrpc": "2.0",
+                "id": 1_i32,
+                "method": "tools/list"
+            });
+
+            let result = client.forward_request(request).await;
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err().to_string();
+            eprintln!("Timeout error: {error_msg}");
+            // Timeout manifests as "Failed to send request" error
+            assert!(
+                error_msg.contains("Failed to send") || error_msg.contains("Bun Docs API error")
+            );
+        }
+
+        #[tokio::test]
+        async fn forward_request_http_404() {
+            // Use httpbingo.org status endpoint to test 404 error
+            let client = BunDocsClient::with_base_url("https://httpbingo.org/status/404")
+                .expect("valid URL");
+
+            let request = json!({
+                "jsonrpc": "2.0",
+                "id": 1_i32,
+                "method": "tools/list"
+            });
+
+            let result = client.forward_request(request).await;
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err().to_string();
+            assert!(error_msg.contains("404") || error_msg.contains("Bun Docs API error"));
+        }
+
+        #[tokio::test]
+        async fn forward_request_http_500() {
+            // Use httpbingo.org status endpoint to test 500 error
+            let client = BunDocsClient::with_base_url("https://httpbingo.org/status/500")
+                .expect("valid URL");
+
+            let request = json!({
+                "jsonrpc": "2.0",
+                "id": 1_i32,
+                "method": "tools/list"
+            });
+
+            let result = client.forward_request(request).await;
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err().to_string();
+            assert!(error_msg.contains("500") || error_msg.contains("Bun Docs API error"));
+        }
+
+        #[tokio::test]
+        async fn parse_invalid_json_response() {
+            // Use httpbingo.org html endpoint to get non-JSON response
+            let client =
+                BunDocsClient::with_base_url("https://httpbingo.org/html").expect("valid URL");
+
+            let request = json!({
+                "jsonrpc": "2.0",
+                "id": 1_i32,
+                "method": "tools/list"
+            });
+
+            let result = client.forward_request(request).await;
+            // httpbingo/html returns HTTP 405 for POST, which tests HTTP error handling
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err().to_string();
+            eprintln!("HTML error: {error_msg}");
+            assert!(
+                error_msg.contains("405")
+                    || error_msg.contains("Method Not Allowed")
+                    || error_msg.contains("Bun Docs API error")
+            );
+        }
+
+        #[test]
+        fn sse_parsing_logic() {
+            // Test SSE data parsing logic without network calls
+            let valid_result = r#"{"result": {"tools": []}}"#;
+            let valid_error = r#"{"error": {"code": -32601, "message": "Not found"}}"#;
+            let neither = r#"{"status": "pending"}"#;
+            let invalid_json = "not valid json";
+
+            // Valid result
+            let parsed_result: serde_json::Result<Value> = serde_json::from_str(valid_result);
+            assert!(parsed_result.is_ok());
+            assert!(
+                parsed_result
+                    .expect("parsed successfully")
+                    .get("result")
+                    .is_some()
+            );
+
+            // Valid error
+            let parsed_error: serde_json::Result<Value> = serde_json::from_str(valid_error);
+            assert!(parsed_error.is_ok());
+            assert!(
+                parsed_error
+                    .expect("parsed successfully")
+                    .get("error")
+                    .is_some()
+            );
+
+            // Neither result nor error (should be skipped in SSE parsing)
+            let parsed_neither: serde_json::Result<Value> = serde_json::from_str(neither);
+            assert!(parsed_neither.is_ok());
+            let value = parsed_neither.expect("parsed successfully");
+            assert!(value.get("result").is_none() && value.get("error").is_none());
+
+            // Invalid JSON
+            let parsed_invalid: serde_json::Result<Value> = serde_json::from_str(invalid_json);
+            let _err = parsed_invalid.unwrap_err();
+        }
+
+        #[test]
+        fn http_status_code_checking() {
+            // Success codes
+            assert!(StatusCode::OK.is_success());
+            assert!(StatusCode::CREATED.is_success());
+            assert!(StatusCode::ACCEPTED.is_success());
+
+            // Client error codes
+            assert!(!StatusCode::BAD_REQUEST.is_success());
+            assert!(!StatusCode::NOT_FOUND.is_success());
+            assert!(!StatusCode::FORBIDDEN.is_success());
+
+            // Server error codes
+            assert!(!StatusCode::INTERNAL_SERVER_ERROR.is_success());
+            assert!(!StatusCode::BAD_GATEWAY.is_success());
+            assert!(!StatusCode::SERVICE_UNAVAILABLE.is_success());
+        }
+
+        #[test]
+        fn content_type_header_parsing() {
+            // Test content type detection logic
+            let sse_types = vec![
+                "text/event-stream",
+                "text/event-stream; charset=utf-8",
+                "text/event-stream;charset=UTF-8",
+            ];
+
+            let json_types = vec![
+                "application/json",
+                "application/json; charset=utf-8",
+                "application/json;charset=UTF-8",
+            ];
+
+            for content_type in sse_types {
+                assert!(content_type.contains("text/event-stream"));
+            }
+
+            for content_type in json_types {
+                assert!(!content_type.contains("text/event-stream"));
+                assert!(content_type.contains("application/json"));
+            }
+        }
+
+        #[test]
+        fn timeout_duration() {
+            let timeout = Duration::from_secs(REQUEST_TIMEOUT_SECS);
+
+            assert_eq!(timeout.as_secs(), 5_u64);
+            assert!(timeout.as_secs() > 0_u64);
+            assert!(timeout.as_secs() < 10_u64);
+        }
+
+        #[test]
+        fn error_message_fallback_logic() {
+            // Test unwrap_or_else logic for error text
+            let ok_result: Result<String, Error> = Ok("error message".to_owned());
+            let err_result: Result<String, Error> = Err(Error::new(Other, "test error"));
+
+            let fallback1 = Result::unwrap_or_else(ok_result, |_| "unknown error".to_owned());
+            let fallback2 = Result::unwrap_or_else(err_result, |_| "unknown error".to_owned());
+
+            assert_eq!(fallback1, "error message");
+            assert_eq!(fallback2, "unknown error");
+        }
     }
 }

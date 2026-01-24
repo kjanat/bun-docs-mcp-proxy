@@ -79,12 +79,17 @@ pub async fn run_mcp_server() -> anyhow::Result<()> {
         };
 
         // JSON-RPC 2.0: validate jsonrpc version field
-        if request.jsonrpc != "2.0" {
+        // Missing or invalid jsonrpc should return -32600 (Invalid Request), not Parse Error
+        let jsonrpc_version = request.jsonrpc.as_deref().unwrap_or("");
+        if jsonrpc_version != "2.0" {
             let request_id = request.id.clone().unwrap_or(serde_json::Value::Null);
             let error_response = JsonRpcResponse::error(
                 request_id,
                 error_code::INVALID_REQUEST,
-                "Invalid Request: jsonrpc must be exactly \"2.0\"".to_owned(),
+                format!(
+                    "Invalid Request: jsonrpc must be exactly \"2.0\", got {:?}",
+                    request.jsonrpc
+                ),
             );
             if let Ok(response_str) = serde_json::to_string(&error_response)
                 && let Err(write_err) = transport.write_message(&response_str).await
@@ -156,4 +161,33 @@ pub async fn run_mcp_server() -> anyhow::Result<()> {
 
     info!("Bun Docs MCP Proxy shutting down");
     Ok(())
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "tests can use expect()")]
+#[allow(clippy::unwrap_used, reason = "tests can use unwrap()")]
+#[allow(deprecated, reason = "cargo_bin is simpler for lib tests")]
+mod tests {
+    use assert_cmd::Command;
+    use core::time::Duration;
+    use predicates::prelude::*;
+
+    #[test]
+    fn main_loop_stdin_parse_error() {
+        // Test that malformed JSON triggers parse error with proper error response
+        let mut cmd = Command::cargo_bin("bun-docs-mcp-proxy").unwrap();
+        cmd.write_stdin("{ invalid json without closing\n")
+            .timeout(Duration::from_secs(2_u64))
+            .assert()
+            .stderr(
+                predicate::str::contains("parse")
+                    .or(predicate::str::contains("Parse error"))
+                    .or(predicate::str::contains("EOF")),
+            );
+        // Verifies error logging in run_mcp_server parse error path
+    }
 }
