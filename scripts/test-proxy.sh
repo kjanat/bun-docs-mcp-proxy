@@ -2,7 +2,11 @@
 # Test script for Rust MCP proxy
 set -e
 
-PROXY="./target/release/bun-docs-mcp-proxy"
+# Get script directory and project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+PROXY="$PROJECT_ROOT/target/release/bun-docs-mcp-proxy"
 
 echo "=== Bun Docs MCP Proxy Test Suite ==="
 echo ""
@@ -10,7 +14,7 @@ echo ""
 # Build if needed
 if [ ! -f "$PROXY" ]; then
 	echo "Building proxy..."
-	cargo build --release
+	(cd "$PROJECT_ROOT" && cargo build --release)
 	echo ""
 fi
 

@@ -340,9 +340,9 @@ dev:
 
 # ===== CI/CD Simulation =====
 
-# Run CI checks locally (matches GitHub Actions)
+# Run CI checks locally (matches GitHub Actions, no network)
 [group('ci')]
-ci: build test test-integration fmt-check clippy
+ci: build test fmt-check clippy
 
 # Run CI coverage workflow locally
 [group('ci')]
