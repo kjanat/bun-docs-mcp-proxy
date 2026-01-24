@@ -14,6 +14,27 @@ development.
 DO NOT REMOVE THIS COMMENT!
 -->
 
+## [Unreleased]
+
+### Added
+
+- `deny.toml` for cargo-deny license/security policy
+- Concurrency group in `release.yml` to prevent duplicate releases
+- `*.profraw`, `*.profdata`, `tools/websockets.*` to `.gitignore`
+
+### Changed
+
+- Moved JS/TS tooling to `tools/` directory (was root + `scripts/`)
+- Expanded `bacon.toml` with project-specific jobs and keybindings
+- Updated `SECURITY.md` supported versions (1.x supported, <1.0.0 unsupported)
+- Updated `CONTRIBUTING.md` Rust version requirement (1.85.0+, edition 2024)
+
+### Fixed
+
+- `AGENTS.md` module structure to match actual v1.0 layout
+- Documentation links to deleted files (`INDEX.md`, `TESTING.md`)
+- `CLAUDE.md` -> `AGENTS.md` references in templates
+
 ## [1.0.0] - 2026-01-24
 
 ### Added
