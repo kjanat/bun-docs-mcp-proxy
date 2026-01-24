@@ -16,27 +16,55 @@ DO NOT REMOVE THIS COMMENT!
 
 ## [Unreleased]
 
-### Changed
-
-- Add AGENTS.md with project guidance for Claude Code
-- Simplify CODEOWNERS and remove redundant entries
-- Normalize formatting across Cargo.toml, dprint, workflows, configs, Taskfile
-- Add opencode MCP entries and adjust zed/dprint integration
-- Migrate README to Taskfile workflows (replaces make/cargo examples)
-- Optimize CI workflow triggers with path filters (skip docs-only changes)
-
 ### Added
 
+- **Security hardening:**
+  - Stream-limited error body reading to prevent memory DoS attacks
+  - SSRF protection: allowlist `bun.com`/`bun.sh` for MDX fetches
+  - SSE deadline timeout to prevent hanging on malicious streams
+- **Performance:** Concurrent markdown fetching (up to 4 parallel requests)
+- **Architecture:** Complete module restructure to library + binary layout:
+  - `src/lib.rs` with `app/`, `mcp/`, `upstream/`, `format/`, `io/`, `util`
+    modules
+  - `src/bin/bun-docs-mcp-proxy.rs` as thin CLI wrapper
+- Generic `Transport<R, W>` trait for testable I/O
+- `BunDocsClientBuilder` with configurable timeout, retries, backoff
+- Typed `UpstreamResponse` enum for proper error handling
+- `JsonRpcEnvelope` for SSE response parsing
+- `Method` enum replacing magic strings
+- Tracing spans via `#[instrument]` throughout
 - CODEOWNERS, issue/PR templates, and security policy
 - Project index documentation for discoverability
-- Manual MCP testing tasks and cross-compilation targets (musl/ARM)
+- justfile with 50+ development recipes
+- bacon.toml for continuous checking
+- lefthook for pre-commit hooks
+
+### Changed
+
+- **JSON-RPC 2.0 compliance:**
+  - Parse errors use `id: null`
+  - Validate `jsonrpc == "2.0"` field (returns `-32600`)
+  - Distinguish `id: null` from missing `id` (notification)
+- Migrate all tests from `tests/` to inline modules
+- Add AGENTS.md with project guidance for Claude Code
+- Normalize formatting across Cargo.toml, dprint, workflows, configs
+- Migrate README to Taskfile workflows
+- Optimize CI workflow triggers with path filters
+- Configure rust-analyzer to enable all features
 
 ### Fixed
 
-- Propagate write errors in comment formatting (prevents panic)
+- Empty-line handling in `StdioTransport::read_message()`
+- `Retry-After` header support for 429 responses
+- Proper URL parsing for `bun://` URIs
+- UTF-8 truncation helpers consolidated to `src/util.rs`
+- `.gitignore` was excluding `src/bin/` directory
+- Deprecated warning in CLI integration tests
 
 ### Removed
 
+- Old flat module structure (`src/main.rs`, `src/http.rs`, etc.)
+- `tests/` directory (migrated to inline modules)
 - TESTING.md and INDEX.md (consolidated into AGENTS.md)
 
 ## [0.3.0] - 2025-11-05
