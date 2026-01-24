@@ -180,7 +180,7 @@ Integration tests requiring network access are feature-gated behind
 
 **Shell Integration Test**:
 
-- `scripts/test-proxy.sh` - End-to-end proxy validation (requires `jq`)
+- `tools/test-proxy.sh` - End-to-end proxy validation (requires `jq`)
 
 ### Running Tests
 

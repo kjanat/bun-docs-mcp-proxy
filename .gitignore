@@ -19,6 +19,9 @@ tarpaulin-report.html
 junit.xml
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
+# Tools output (fetch-docs.ts)
+tools/websockets.*
+
 # Logs
 logs/
 *.log

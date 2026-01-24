@@ -99,7 +99,7 @@ test-doc:
 # Run integration tests only (Linux/macOS)
 [group('test')]
 test-integration: build-release
-    bash scripts/test-proxy.sh
+    bash tools/test-proxy.sh
 
 # Run tests with nextest (faster, JUnit output)
 [group('test')]
