@@ -85,6 +85,116 @@ pub struct JsonRpcError {
     pub data: Option<Value>,
 }
 
+/// The error object within a JSON-RPC error response envelope.
+///
+/// This is used for parsing upstream responses where we need to preserve
+/// the original error structure including the i64 code.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct JsonRpcErrorObject {
+    /// Error code (i64 to handle any upstream value)
+    pub code: i64,
+    /// Human-readable error message
+    pub message: String,
+    /// Optional additional error data
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
+}
+
+/// Represents a parsed JSON-RPC 2.0 response envelope.
+///
+/// Used for parsing upstream responses before converting to our response type.
+/// The untagged enum allows serde to try both variants during deserialization.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum JsonRpcEnvelope {
+    /// A successful JSON-RPC response with a result field
+    Success {
+        /// Protocol version (should be "2.0")
+        #[allow(dead_code, reason = "required for serde deserialization")]
+        jsonrpc: String,
+        /// The result payload
+        result: Value,
+        /// Request identifier
+        #[allow(dead_code, reason = "required for serde deserialization")]
+        id: Value,
+    },
+    /// An error JSON-RPC response with an error field
+    Error {
+        /// Protocol version (should be "2.0")
+        #[allow(dead_code, reason = "required for serde deserialization")]
+        jsonrpc: String,
+        /// The error object
+        error: JsonRpcErrorObject,
+        /// Request identifier
+        #[allow(dead_code, reason = "required for serde deserialization")]
+        id: Value,
+    },
+}
+
+impl JsonRpcEnvelope {
+    /// Try to parse a Value as a JSON-RPC envelope
+    ///
+    /// # Errors
+    /// Returns an error if the value doesn't match the expected envelope structure
+    pub fn from_value(value: Value) -> Result<Self, serde_json::Error> {
+        serde_json::from_value(value)
+    }
+
+    /// Returns true if this is a success response
+    #[must_use]
+    #[allow(dead_code, reason = "public API for consumers and tests")]
+    pub const fn is_success(&self) -> bool {
+        matches!(self, Self::Success { .. })
+    }
+
+    /// Returns true if this is an error response
+    #[must_use]
+    #[allow(dead_code, reason = "public API for consumers and tests")]
+    pub const fn is_error(&self) -> bool {
+        matches!(self, Self::Error { .. })
+    }
+
+    /// Extract the result value if success, None otherwise
+    #[must_use]
+    #[allow(dead_code, reason = "public API for consumers and tests")]
+    pub const fn result(&self) -> Option<&Value> {
+        match self {
+            Self::Success { result, .. } => Some(result),
+            Self::Error { .. } => None,
+        }
+    }
+
+    /// Extract the error object if error, None otherwise
+    #[must_use]
+    #[allow(dead_code, reason = "public API for consumers and tests")]
+    pub const fn error(&self) -> Option<&JsonRpcErrorObject> {
+        match self {
+            Self::Success { .. } => None,
+            Self::Error { error, .. } => Some(error),
+        }
+    }
+
+    /// Consume self and return the result value if success, None otherwise
+    #[must_use]
+    #[allow(dead_code, reason = "public API for consumers and tests")]
+    pub fn into_result(self) -> Option<Value> {
+        match self {
+            Self::Success { result, .. } => Some(result),
+            Self::Error { .. } => None,
+        }
+    }
+
+    /// Consume self and return the error object if error, None otherwise
+    #[must_use]
+    #[allow(dead_code, reason = "public API for consumers and tests")]
+    pub fn into_error(self) -> Option<JsonRpcErrorObject> {
+        match self {
+            Self::Success { .. } => None,
+            Self::Error { error, .. } => Some(error),
+        }
+    }
+}
+
 impl JsonRpcError {
     /// Create a new JSON-RPC error without additional data
     ///
@@ -367,5 +477,134 @@ mod tests {
 
         let data_field = error_field.get("data").expect("data field should exist");
         assert_eq!(data_field, &data);
+    }
+
+    // JsonRpcEnvelope tests
+
+    #[test]
+    fn parse_success_envelope() {
+        let json = r#"{"jsonrpc":"2.0","result":{"foo":"bar"},"id":1}"#;
+        let envelope: JsonRpcEnvelope = serde_json::from_str(json).unwrap();
+        assert!(envelope.is_success());
+        assert!(!envelope.is_error());
+        assert!(envelope.result().is_some());
+        assert!(envelope.error().is_none());
+        assert_eq!(envelope.result().unwrap(), &json!({"foo": "bar"}));
+    }
+
+    #[test]
+    fn parse_error_envelope() {
+        let json = r#"{"jsonrpc":"2.0","error":{"code":-32600,"message":"Invalid"},"id":1}"#;
+        let envelope: JsonRpcEnvelope = serde_json::from_str(json).unwrap();
+        assert!(envelope.is_error());
+        assert!(!envelope.is_success());
+        assert!(envelope.error().is_some());
+        assert!(envelope.result().is_none());
+        assert_eq!(envelope.error().unwrap().code, -32600);
+        assert_eq!(envelope.error().unwrap().message, "Invalid");
+    }
+
+    #[test]
+    fn parse_error_envelope_with_data() {
+        let json = r#"{"jsonrpc":"2.0","error":{"code":-32000,"message":"Custom","data":{"detail":"info"}},"id":"abc"}"#;
+        let envelope: JsonRpcEnvelope = serde_json::from_str(json).unwrap();
+        assert!(envelope.is_error());
+        let error = envelope.error().unwrap();
+        assert_eq!(error.code, -32000);
+        assert_eq!(error.message, "Custom");
+        assert!(error.data.is_some());
+        assert_eq!(error.data.as_ref().unwrap(), &json!({"detail": "info"}));
+    }
+
+    #[test]
+    fn envelope_from_value_success() {
+        let value = json!({"jsonrpc": "2.0", "result": [1, 2, 3], "id": 42});
+        let envelope = JsonRpcEnvelope::from_value(value).unwrap();
+        assert!(envelope.is_success());
+        assert_eq!(envelope.result().unwrap(), &json!([1, 2, 3]));
+    }
+
+    #[test]
+    fn envelope_from_value_error() {
+        let value = json!({
+            "jsonrpc": "2.0",
+            "error": {"code": -32601, "message": "Method not found"},
+            "id": null
+        });
+        let envelope = JsonRpcEnvelope::from_value(value).unwrap();
+        assert!(envelope.is_error());
+        assert_eq!(envelope.error().unwrap().code, -32601);
+    }
+
+    #[test]
+    fn envelope_from_value_invalid() {
+        // Missing required fields
+        let value = json!({"foo": "bar"});
+        let result = JsonRpcEnvelope::from_value(value);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn error_object_serialization() {
+        let error_obj = JsonRpcErrorObject {
+            code: -32700,
+            message: "Parse error".to_owned(),
+            data: Some(json!({"line": 10})),
+        };
+        let serialized = serde_json::to_value(&error_obj).unwrap();
+        assert_eq!(serialized["code"], -32700);
+        assert_eq!(serialized["message"], "Parse error");
+        assert_eq!(serialized["data"]["line"], 10);
+    }
+
+    #[test]
+    fn error_object_without_data_omits_field() {
+        let error_obj = JsonRpcErrorObject {
+            code: -32600,
+            message: "Invalid".to_owned(),
+            data: None,
+        };
+        let serialized = serde_json::to_string(&error_obj).unwrap();
+        assert!(!serialized.contains("\"data\""));
+    }
+
+    #[test]
+    fn envelope_into_result_success() {
+        let envelope: JsonRpcEnvelope =
+            serde_json::from_str(r#"{"jsonrpc":"2.0","result":{"data":"test"},"id":1}"#).unwrap();
+        let result = envelope.into_result();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), json!({"data": "test"}));
+    }
+
+    #[test]
+    fn envelope_into_result_error_returns_none() {
+        let envelope: JsonRpcEnvelope = serde_json::from_str(
+            r#"{"jsonrpc":"2.0","error":{"code":-32600,"message":"Invalid"},"id":1}"#,
+        )
+        .unwrap();
+        let result = envelope.into_result();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn envelope_into_error_success_returns_none() {
+        let envelope: JsonRpcEnvelope =
+            serde_json::from_str(r#"{"jsonrpc":"2.0","result":"ok","id":1}"#).unwrap();
+        let error = envelope.into_error();
+        assert!(error.is_none());
+    }
+
+    #[test]
+    fn envelope_into_error_error() {
+        let envelope: JsonRpcEnvelope = serde_json::from_str(
+            r#"{"jsonrpc":"2.0","error":{"code":-32601,"message":"Not found"},"id":1}"#,
+        )
+        .unwrap();
+        let error = envelope.into_error();
+        assert!(error.is_some());
+        let err = error.unwrap();
+        assert_eq!(err.code, -32601);
+        assert_eq!(err.message, "Not found");
     }
 }

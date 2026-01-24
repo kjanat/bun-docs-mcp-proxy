@@ -16,6 +16,7 @@
 //! - For 5xx/network: exponential backoff (200 ms -> 400 ms -> 800 ms, capped at 1 s).
 
 use crate::constants::content_type;
+use crate::protocol::JsonRpcEnvelope;
 use crate::util::truncate_utf8;
 use anyhow::{Context as _, Result};
 use bytes::Bytes;
@@ -46,6 +47,73 @@ const MAX_ERROR_BODY_SIZE: usize = 100_000_usize;
 
 /// Maximum size for error body snippets in logs (2KB)
 const MAX_ERROR_SNIPPET_SIZE: usize = 2048;
+
+/// Parsed response from the upstream Bun Docs MCP server.
+/// Distinguishes between successful results and JSON-RPC errors.
+#[derive(Debug, Clone)]
+pub enum UpstreamResponse {
+    /// Successful response with result payload
+    Ok(Value),
+    /// Error response from upstream
+    Err {
+        /// JSON-RPC error code
+        code: i64,
+        /// Human-readable error message
+        message: String,
+        /// Optional additional error data
+        data: Option<Value>,
+    },
+}
+
+impl UpstreamResponse {
+    /// Returns true if this is a successful response
+    #[must_use]
+    #[allow(dead_code, reason = "public API for consumers and tests")]
+    pub const fn is_ok(&self) -> bool {
+        matches!(self, Self::Ok(_))
+    }
+
+    /// Returns true if this is an error response
+    #[must_use]
+    #[allow(dead_code, reason = "public API for consumers and tests")]
+    pub const fn is_err(&self) -> bool {
+        matches!(self, Self::Err { .. })
+    }
+
+    /// Converts to Result for ergonomic handling
+    #[allow(dead_code, reason = "public API for consumers and tests")]
+    pub fn into_result(self) -> Result<Value, (i64, String, Option<Value>)> {
+        match self {
+            Self::Ok(value) => Ok(value),
+            Self::Err {
+                code,
+                message,
+                data,
+            } => Err((code, message, data)),
+        }
+    }
+
+    /// Parse a JSON value into an `UpstreamResponse`.
+    ///
+    /// Expects either `{"result": ...}` or `{"error": {"code": ..., "message": ...}}`.
+    /// Uses [`JsonRpcEnvelope`] for parsing to ensure consistent handling.
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "consuming value for ownership"
+    )]
+    fn from_json(value: Value) -> anyhow::Result<Self> {
+        match JsonRpcEnvelope::from_value(value)
+            .map_err(|e| anyhow::anyhow!("Invalid JSON-RPC response: {e}"))?
+        {
+            JsonRpcEnvelope::Success { result, .. } => Ok(Self::Ok(result)),
+            JsonRpcEnvelope::Error { error, .. } => Ok(Self::Err {
+                code: error.code,
+                message: error.message,
+                data: error.data,
+            }),
+        }
+    }
+}
 
 /// HTTP client for interacting with the Bun Docs API
 pub struct BunDocsClient {
@@ -202,15 +270,17 @@ impl BunDocsClient {
     /// * `request` - JSON-RPC request object
     ///
     /// # Returns
-    /// JSON-RPC response from the API
+    /// `UpstreamResponse::Ok` with result payload on success,
+    /// `UpstreamResponse::Err` with code/message/data on upstream JSON-RPC error
     ///
     /// # Errors
-    /// Returns an error if all retry attempts fail or a non-retryable error occurs
+    /// Returns an `anyhow::Error` if all retry attempts fail, a non-retryable HTTP error occurs,
+    /// or the response cannot be parsed as a valid JSON-RPC response
     #[allow(
         clippy::too_many_lines,
         reason = "complex retry logic with error handling"
     )]
-    pub async fn forward_request(&self, request: Value) -> Result<Value> {
+    pub async fn forward_request(&self, request: Value) -> Result<UpstreamResponse> {
         debug!("Forwarding request to Bun Docs API");
 
         let mut last_error: Option<anyhow::Error> = None;
@@ -241,15 +311,17 @@ impl BunDocsClient {
 
                     if status.is_success() {
                         // Success: decide how to parse based on content type
-                        if resp_content_type.starts_with(content_type::SSE) {
+                        let json_value = if resp_content_type.starts_with(content_type::SSE) {
                             debug!("Parsing SSE stream");
-                            return self.parse_sse_response(response).await;
-                        }
-                        debug!("Parsing regular JSON response");
-                        return response
-                            .json()
-                            .await
-                            .context("Failed to parse JSON response");
+                            self.parse_sse_response(response).await?
+                        } else {
+                            debug!("Parsing regular JSON response");
+                            response
+                                .json()
+                                .await
+                                .context("Failed to parse JSON response")?
+                        };
+                        return UpstreamResponse::from_json(json_value);
                     }
                     // Read body (truncated) for context
                     let bytes = response.bytes().await.unwrap_or_else(|error| {
@@ -574,7 +646,7 @@ mod tests {
             .mock("POST", "/")
             .with_status(200_usize)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"result": {"tools": [{"name": "SearchBun", "description": "Search Bun documentation"}]}}"#)
+            .with_body(r#"{"jsonrpc":"2.0","result":{"tools":[{"name":"SearchBun","description":"Search Bun documentation"}]},"id":1}"#)
             .expect(1_usize)
             .create_async()
             .await;
@@ -595,11 +667,11 @@ mod tests {
             "Should successfully forward tools/list request"
         );
 
-        let response = result.expect("successful response");
-        assert!(response.get("result").is_some());
+        let upstream = result.expect("successful response");
+        assert!(upstream.is_ok(), "Should be UpstreamResponse::Ok");
         // Bun Docs should return tools
-        let result_field = response.get("result").expect("result field should exist");
-        assert!(result_field.get("tools").is_some());
+        let result_value = upstream.into_result().expect("should be Ok variant");
+        assert!(result_value.get("tools").is_some());
     }
 
     #[tokio::test]
@@ -610,7 +682,7 @@ mod tests {
             .mock("POST", "/")
             .with_status(200_usize)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"result": {"content": [{"type": "text", "text": "Bun.serve() documentation..."}]}}"#)
+            .with_body(r#"{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"Bun.serve() documentation..."}]},"id":2}"#)
             .expect(1_usize)
             .create_async()
             .await;
@@ -637,8 +709,8 @@ mod tests {
             "Should successfully forward tools/call request"
         );
 
-        let response = result.expect("successful response");
-        assert!(response.get("result").is_some());
+        let upstream = result.expect("successful response");
+        assert!(upstream.is_ok(), "Should be UpstreamResponse::Ok");
     }
 
     // Integration tests against live Bun Docs API (require network, can be flaky)
@@ -656,11 +728,11 @@ mod tests {
         let result = client.forward_request(request).await;
         assert!(result.is_ok(), "Live API should respond to tools/list");
 
-        let response = result.expect("successful response");
-        assert!(response.get("result").is_some());
+        let upstream = result.expect("successful response");
+        assert!(upstream.is_ok(), "Should be UpstreamResponse::Ok");
         // Bun Docs should return tools
-        let result_field = response.get("result").expect("result field should exist");
-        assert!(result_field.get("tools").is_some());
+        let result_value = upstream.into_result().expect("should be Ok variant");
+        assert!(result_value.get("tools").is_some());
     }
 
     #[tokio::test]
@@ -682,8 +754,8 @@ mod tests {
         let result = client.forward_request(request).await;
         assert!(result.is_ok(), "Live API should respond to tools/call");
 
-        let response = result.expect("successful response");
-        assert!(response.get("result").is_some());
+        let upstream = result.expect("successful response");
+        assert!(upstream.is_ok(), "Should be UpstreamResponse::Ok");
     }
 
     #[tokio::test]
@@ -694,7 +766,9 @@ mod tests {
             .mock("POST", "/")
             .with_status(200_usize)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"error": {"code": -32601, "message": "Method not found"}}"#)
+            .with_body(
+                r#"{"jsonrpc":"2.0","error":{"code":-32601,"message":"Method not found"},"id":3}"#,
+            )
             .expect(1_usize)
             .create_async()
             .await;
@@ -712,11 +786,15 @@ mod tests {
         drop(server);
         assert!(result.is_ok(), "Should receive JSON-RPC error response");
 
-        let response = result.expect("successful HTTP response");
+        let upstream = result.expect("successful HTTP response");
         assert!(
-            response.get("error").is_some(),
-            "Expected error field in JSON-RPC response"
+            upstream.is_err(),
+            "Expected UpstreamResponse::Err for JSON-RPC error"
         );
+        // Verify error details
+        let (code, message, _data) = upstream.into_result().expect_err("should be Err variant");
+        assert_eq!(code, -32601_i64);
+        assert_eq!(message, "Method not found");
     }
 
     #[tokio::test]
@@ -731,11 +809,11 @@ mod tests {
 
         let result = client.forward_request(request).await;
         // The API should either return a JSON-RPC error response or fail with an HTTP error
-        if let Ok(response) = result {
-            // If successful, should have an error field in JSON-RPC response
+        if let Ok(upstream) = result {
+            // If successful HTTP, should be an UpstreamResponse::Err
             assert!(
-                response.get("error").is_some(),
-                "Expected error field in response"
+                upstream.is_err(),
+                "Expected UpstreamResponse::Err for invalid method"
             );
         }
         // HTTP-level error is also acceptable
@@ -892,13 +970,13 @@ mod tests {
             .mock("POST", "/")
             .with_status(200_usize)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"result": {"tools": []}}"#)
+            .with_body(r#"{"jsonrpc":"2.0","result":{"tools":[]},"id":1}"#)
             .expect(1_usize)
             .create_async()
             .await;
 
         let client = BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
-        let request = json!({"method": "tools/list"});
+        let request = json!({"jsonrpc":"2.0","method":"tools/list","id":1});
 
         let result = client.forward_request(request).await;
 
@@ -906,8 +984,8 @@ mod tests {
         mock2.assert_async().await;
         drop(server);
         assert!(result.is_ok(), "Should succeed after retry");
-        let response = result.expect("successful response");
-        assert!(response.get("result").is_some());
+        let upstream = result.expect("successful response");
+        assert!(upstream.is_ok(), "Should be UpstreamResponse::Ok");
     }
 
     #[tokio::test]
@@ -981,13 +1059,13 @@ mod tests {
             .mock("POST", "/")
             .with_status(200_usize)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"result": {"data": "success"}}"#)
+            .with_body(r#"{"jsonrpc":"2.0","result":{"data":"success"},"id":1}"#)
             .expect(1_usize)
             .create_async()
             .await;
 
         let client = BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
-        let request = json!({"method": "test"});
+        let request = json!({"jsonrpc":"2.0","method":"test","id":1});
 
         let result = client.forward_request(request).await;
 
@@ -1016,13 +1094,13 @@ mod tests {
             .mock("POST", "/")
             .with_status(200_usize)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"result": {}}"#)
+            .with_body(r#"{"jsonrpc":"2.0","result":{},"id":1}"#)
             .expect(1_usize)
             .create_async()
             .await;
 
         let client = BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
-        let request = json!({"method": "test"});
+        let request = json!({"jsonrpc":"2.0","method":"test","id":1});
 
         let result = client.forward_request(request).await;
 
@@ -1049,13 +1127,13 @@ mod tests {
             .mock("POST", "/")
             .with_status(200_usize)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"result": {}}"#)
+            .with_body(r#"{"jsonrpc":"2.0","result":{},"id":1}"#)
             .expect(1_usize)
             .create_async()
             .await;
 
         let client = BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
-        let request = json!({"method": "test"});
+        let request = json!({"jsonrpc":"2.0","method":"test","id":1});
 
         let result = client.forward_request(request).await;
 
@@ -1192,13 +1270,13 @@ mod tests {
             .mock("POST", "/")
             .with_status(200_usize)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"result": {"tools": []}}"#)
+            .with_body(r#"{"jsonrpc":"2.0","result":{"tools":[]},"id":1}"#)
             .expect(1_usize)
             .create_async()
             .await;
 
         let client = BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
-        let request = json!({"method": "tools/list"});
+        let request = json!({"jsonrpc":"2.0","method":"tools/list","id":1});
 
         let result = client.forward_request(request).await;
 
@@ -1207,8 +1285,8 @@ mod tests {
         drop(server);
 
         assert!(result.is_ok(), "Should succeed after transient 503 retry");
-        let response = result.expect("successful response");
-        assert!(response.get("result").is_some());
+        let upstream = result.expect("successful response");
+        assert!(upstream.is_ok(), "Should be UpstreamResponse::Ok");
         // Verifies src/http.rs line 315-319: warn!("Transient HTTP status...")
         // Verifies line 321: backoff_delay_ms calculation
         // Verifies line 322: sleep execution
@@ -1262,5 +1340,135 @@ mod tests {
         // Verifies src/http.rs line 314: is_transient_status check for all 5xx codes
         // Verifies line 317-318: retry condition check (attempt < MAX_RETRIES)
         // Verifies line 321-322: backoff delays between attempts
+    }
+
+    // UpstreamResponse unit tests
+    #[test]
+    fn upstream_response_ok_is_ok() {
+        let resp = UpstreamResponse::Ok(json!({"data": "test"}));
+        assert!(resp.is_ok());
+        assert!(!resp.is_err());
+    }
+
+    #[test]
+    fn upstream_response_err_is_err() {
+        let resp = UpstreamResponse::Err {
+            code: -32601_i64,
+            message: "Method not found".to_owned(),
+            data: None,
+        };
+        assert!(resp.is_err());
+        assert!(!resp.is_ok());
+    }
+
+    #[test]
+    fn upstream_response_into_result_ok() {
+        let resp = UpstreamResponse::Ok(json!({"tools": []}));
+        let result = resp.into_result();
+        assert!(result.is_ok());
+        let value = result.expect("should be Ok");
+        assert!(value.get("tools").is_some());
+    }
+
+    #[test]
+    fn upstream_response_into_result_err() {
+        let resp = UpstreamResponse::Err {
+            code: -32700_i64,
+            message: "Parse error".to_owned(),
+            data: Some(json!({"details": "unexpected token"})),
+        };
+        let result = resp.into_result();
+        assert!(result.is_err());
+        let (code, message, data) = result.expect_err("should be Err");
+        assert_eq!(code, -32700_i64);
+        assert_eq!(message, "Parse error");
+        assert!(data.is_some());
+    }
+
+    #[test]
+    fn upstream_response_from_json_result() {
+        // JsonRpcEnvelope requires jsonrpc and id fields
+        let json = json!({"jsonrpc": "2.0", "result": {"content": "test data"}, "id": 1});
+        let resp = UpstreamResponse::from_json(json).expect("should parse");
+        assert!(resp.is_ok());
+        let value = resp.into_result().expect("should be Ok");
+        assert_eq!(value.get("content").unwrap(), "test data");
+    }
+
+    #[test]
+    fn upstream_response_from_json_error() {
+        // JsonRpcEnvelope requires jsonrpc and id fields
+        let json = json!({
+            "jsonrpc": "2.0",
+            "error": {"code": -32601, "message": "Method not found"},
+            "id": 1
+        });
+        let resp = UpstreamResponse::from_json(json).expect("should parse");
+        assert!(resp.is_err());
+        let (code, message, data) = resp.into_result().expect_err("should be Err");
+        assert_eq!(code, -32601_i64);
+        assert_eq!(message, "Method not found");
+        assert!(data.is_none());
+    }
+
+    #[test]
+    fn upstream_response_from_json_error_with_data() {
+        // JsonRpcEnvelope requires jsonrpc and id fields
+        let json = json!({
+            "jsonrpc": "2.0",
+            "error": {
+                "code": -32602,
+                "message": "Invalid params",
+                "data": {"param": "query", "reason": "missing"}
+            },
+            "id": 1
+        });
+        let resp = UpstreamResponse::from_json(json).expect("should parse");
+        assert!(resp.is_err());
+        let (code, message, data) = resp.into_result().expect_err("should be Err");
+        assert_eq!(code, -32602_i64);
+        assert_eq!(message, "Invalid params");
+        assert!(data.is_some());
+        let data_val = data.unwrap();
+        assert_eq!(data_val.get("param").unwrap(), "query");
+    }
+
+    #[test]
+    fn upstream_response_from_json_missing_error_code() {
+        // JsonRpcEnvelope requires code field in error object
+        let json = json!({"jsonrpc": "2.0", "error": {"message": "No code"}, "id": 1});
+        let result = UpstreamResponse::from_json(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn upstream_response_from_json_missing_error_message() {
+        // JsonRpcEnvelope requires message field in error object
+        let json = json!({"jsonrpc": "2.0", "error": {"code": -32600}, "id": 1});
+        let result = UpstreamResponse::from_json(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn upstream_response_from_json_neither_field() {
+        // JSON with neither result nor error field should fail
+        let json = json!({"other": "field"});
+        let result = UpstreamResponse::from_json(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn upstream_response_from_json_both_fields() {
+        // JSON-RPC spec says never both, but test serde behavior
+        // With untagged enum, Success variant is tried first
+        let json = json!({
+            "jsonrpc": "2.0",
+            "result": "ok",
+            "error": {"code": -1, "message": "err"},
+            "id": 1
+        });
+        let result = UpstreamResponse::from_json(json);
+        // Should parse as Success (untagged enum order)
+        assert!(matches!(result, Ok(UpstreamResponse::Ok(_))));
     }
 }

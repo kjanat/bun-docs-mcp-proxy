@@ -157,12 +157,12 @@ async fn test_handle_tools_call_mocked() {
     // Mock successful API response without network call
     let mut server = mockito::Server::new_async().await;
 
-    // Mock the SSE stream response
+    // Mock the SSE stream response - must include jsonrpc and id for JsonRpcEnvelope parsing
     let mock = server
         .mock("POST", "/")
         .with_status(200)
         .with_header("content-type", "text/event-stream")
-        .with_body("data: {\"result\":{\"content\":[{\"text\":\"Mocked Bun.serve documentation\",\"type\":\"text\"}]}}\n\n")
+        .with_body("data: {\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"Mocked Bun.serve documentation\",\"type\":\"text\"}]},\"id\":1}\n\n")
         .expect(1)
         .create_async()
         .await;
@@ -199,12 +199,12 @@ async fn test_handle_resources_read_mocked() {
     // Mock successful resource read without network call
     let mut server = mockito::Server::new_async().await;
 
-    // Mock the SSE stream response for resource read
+    // Mock the SSE stream response for resource read - must include jsonrpc and id for JsonRpcEnvelope parsing
     let mock = server
         .mock("POST", "/")
         .with_status(200)
         .with_header("content-type", "text/event-stream")
-        .with_body("data: {\"result\":{\"content\":[{\"text\":\"Mocked HTTP documentation\",\"type\":\"text\"}]}}\n\n")
+        .with_body("data: {\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"Mocked HTTP documentation\",\"type\":\"text\"}]},\"id\":\"res-mock\"}\n\n")
         .expect(1)
         .create_async()
         .await;

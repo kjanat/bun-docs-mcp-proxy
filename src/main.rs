@@ -434,25 +434,21 @@ async fn direct_search(
     });
 
     // Execute search
-    let result = client.forward_request(request).await?;
+    let upstream = client.forward_request(request).await?;
 
-    // Check for API error response
-    if let Some(error) = result.get("error") {
-        let error_msg = error
-            .get("message")
-            .and_then(|m| m.as_str())
-            .unwrap_or("Unknown error");
-        return Err(anyhow::anyhow!("API error: {error_msg}"));
-    }
-
-    // Extract result field if present
-    let search_result = result.get("result").unwrap_or(&result);
+    // Handle upstream response
+    let search_result = match upstream {
+        http::UpstreamResponse::Ok(result) => result,
+        http::UpstreamResponse::Err { message, .. } => {
+            return Err(anyhow::anyhow!("API error: {message}"));
+        }
+    };
 
     // Format output
     let formatted = match format {
-        OutputFormat::Json => format_json(search_result)?,
-        OutputFormat::Text => format_text(search_result)?,
-        OutputFormat::Markdown => format_markdown(search_result, &client).await?,
+        OutputFormat::Json => format_json(&search_result)?,
+        OutputFormat::Text => format_text(&search_result)?,
+        OutputFormat::Markdown => format_markdown(&search_result, &client).await?,
     };
 
     // Write output
@@ -619,19 +615,29 @@ async fn handle_tools_call(
     });
 
     match client.forward_request(original_request).await {
-        Ok(result) => {
+        Ok(upstream) => {
             info!("Successfully got response from Bun Docs");
-
-            // Based on protocol analysis, the SSE data contains
-            // the complete JSON-RPC response. Extract the result field.
-            #[allow(
-                clippy::option_if_let_else,
-                reason = "clearer with explicit pattern match"
-            )]
-            if let Some(result_field) = result.get("result") {
-                JsonRpcResponse::success(request_id, result_field.clone())
-            } else {
-                JsonRpcResponse::success(request_id, result)
+            match upstream {
+                http::UpstreamResponse::Ok(result) => JsonRpcResponse::success(request_id, result),
+                http::UpstreamResponse::Err {
+                    code,
+                    message,
+                    data,
+                } => {
+                    // Upstream returned a JSON-RPC error - propagate it
+                    // Note: code is i64 from upstream, but JsonRpcError uses i32
+                    // Truncation is acceptable for standard JSON-RPC error codes
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "JSON-RPC error codes fit in i32"
+                    )]
+                    let code_i32 = code as i32;
+                    if let Some(data) = data {
+                        JsonRpcResponse::error_with_data(request_id, code_i32, message, data)
+                    } else {
+                        JsonRpcResponse::error(request_id, code_i32, message)
+                    }
+                }
             }
         }
         Err(e) => {
@@ -756,34 +762,52 @@ async fn handle_resources_read(
     });
 
     match client.forward_request(search_request).await {
-        Ok(result) => {
+        Ok(upstream) => {
             info!("Successfully got resource from Bun Docs");
+            match upstream {
+                http::UpstreamResponse::Ok(result) => {
+                    // Serialize the result to JSON string for resource text field
+                    let text = match serde_json::to_string(&result) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            error!("Failed to serialize resource content: {}", e);
+                            return JsonRpcResponse::error(
+                                request_id,
+                                error_code::INTERNAL_ERROR,
+                                format!("Failed to serialize resource: {e}"),
+                            );
+                        }
+                    };
 
-            // Serialize the result to JSON string for resource text field
-            // Note: result is the complete JSON-RPC response from Bun Docs API
-            // containing {"jsonrpc":"2.0","id":...,"result":{...}}
-            let text = match serde_json::to_string(&result) {
-                Ok(s) => s,
-                Err(e) => {
-                    error!("Failed to serialize resource content: {}", e);
-                    return JsonRpcResponse::error(
-                        request_id,
-                        error_code::INTERNAL_ERROR,
-                        format!("Failed to serialize resource: {e}"),
-                    );
+                    // Wrap in MCP resource format
+                    let resource_response = serde_json::json!({
+                        "contents": [{
+                            "uri": uri,
+                            "mimeType": content_type::JSON,
+                            "text": text
+                        }]
+                    });
+
+                    JsonRpcResponse::success(request_id, resource_response)
                 }
-            };
-
-            // Wrap in MCP resource format
-            let resource_response = serde_json::json!({
-                "contents": [{
-                    "uri": uri,
-                    "mimeType": content_type::JSON,
-                    "text": text
-                }]
-            });
-
-            JsonRpcResponse::success(request_id, resource_response)
+                http::UpstreamResponse::Err {
+                    code,
+                    message,
+                    data,
+                } => {
+                    // Upstream returned a JSON-RPC error - propagate it
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "JSON-RPC error codes fit in i32"
+                    )]
+                    let code_i32 = code as i32;
+                    if let Some(data) = data {
+                        JsonRpcResponse::error_with_data(request_id, code_i32, message, data)
+                    } else {
+                        JsonRpcResponse::error(request_id, code_i32, message)
+                    }
+                }
+            }
         }
         Err(e) => {
             error!("Failed to read resource: {}", e);
