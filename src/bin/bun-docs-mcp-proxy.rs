@@ -611,6 +611,11 @@ mod tests {
 
     /// CLI integration tests (process-spawning, require network)
     mod cli_integration {
+        #![allow(
+            deprecated,
+            reason = "cargo_bin_cmd! macro unavailable in inline tests"
+        )]
+
         use assert_cmd::Command;
         use predicates::prelude::*;
         #[cfg(feature = "integration-tests")]
