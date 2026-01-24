@@ -33,7 +33,7 @@ Closes #
 
 <!-- Describe the tests you ran and how to reproduce them -->
 
-- [ ] All existing tests pass (`task t` or `cargo test`)
+- [ ] All existing tests pass (`just t` or `cargo test`)
 - [ ] Added new tests for new functionality
 - [ ] Tested manually with example requests
 - [ ] Tested on multiple platforms (if applicable)
@@ -42,7 +42,7 @@ Closes #
 
 ```bash
 # Example
-task t
+just t
 RUST_LOG=debug ./target/release/bun-docs-mcp-proxy
 ```
 
@@ -50,8 +50,8 @@ RUST_LOG=debug ./target/release/bun-docs-mcp-proxy
 
 <!-- Verify all quality checks pass -->
 
-- [ ] Code passes clippy lints (`task l` or `cargo clippy`)
-- [ ] Code is formatted (`task f` or `cargo fmt`)
+- [ ] Code passes clippy lints (`just l` or `cargo clippy`)
+- [ ] Code is formatted (`just f` or `cargo fmt`)
 - [ ] No new compiler warnings
 - [ ] Documentation updated (if needed)
 - [ ] CLAUDE.md updated (if needed)

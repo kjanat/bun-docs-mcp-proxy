@@ -24,7 +24,7 @@ build something useful together.
 
 - Rust 1.81.0 or later
 - Cargo (comes with Rust)
-- [Task](https://taskfile.dev) (optional but recommended)
+- [just](https://just.systems) (optional but recommended)
 - Git
 
 ### Fork and Clone
@@ -46,8 +46,8 @@ build something useful together.
 ### Build the Project
 
 ```bash
-# Using Task (recommended)
-task br
+# Using just (recommended)
+just br
 
 # Or using cargo directly
 cargo build --release
@@ -55,20 +55,20 @@ cargo build --release
 
 ## Development Workflow
 
-### Using Task (Recommended)
+### Using just (Recommended)
 
-This project uses [Task](https://taskfile.dev) for build automation:
+This project uses [just](https://just.systems) for build automation:
 
 ```bash
 # Quick reference
-task br          # Build release binary
-task t           # Run all tests
-task c           # Run all checks (fmt + clippy + tests)
-task dev         # Watch mode (auto-rebuild on changes)
-task cov         # Generate coverage report
+just br          # Build release binary
+just t           # Run all tests
+just c           # Run all checks (fmt + clippy + tests)
+just dev         # Watch mode (auto-rebuild on changes)
+just cov         # Generate coverage report
 
-# See all available tasks
-task --list-all
+# See all available recipes
+just --list-all
 ```
 
 ### Development Cycle
@@ -84,13 +84,13 @@ task --list-all
 3. **Run checks frequently:**
 
    ```bash
-   task c  # Runs format, clippy, and tests
+   just c  # Runs format, clippy, and tests
    ```
 
 4. **Watch mode for rapid iteration:**
 
    ```bash
-   task dev  # Auto-rebuilds on file changes
+   just dev  # Auto-rebuilds on file changes
    ```
 
 ## Code Standards
@@ -100,8 +100,8 @@ task --list-all
 Code must be formatted with `rustfmt`:
 
 ```bash
-# Using Task
-task f
+# Using just
+just fmt
 
 # Or using cargo
 cargo fmt
@@ -112,8 +112,8 @@ cargo fmt
 Code must pass clippy lints without warnings:
 
 ```bash
-# Using Task
-task l
+# Using just
+just clippy
 
 # Or using cargo
 cargo clippy --all-targets --all-features -- -D warnings
@@ -132,9 +132,9 @@ The project has specific clippy lint rules in `Cargo.toml`. Key requirements:
 
 Before submitting a PR, ensure:
 
-- [ ] Code is formatted (`task f`)
-- [ ] Clippy passes with no warnings (`task l`)
-- [ ] All tests pass (`task t`)
+- [ ] Code is formatted (`just f`)
+- [ ] Clippy passes with no warnings (`just l`)
+- [ ] All tests pass (`just t`)
 - [ ] New functionality has tests
 - [ ] Documentation is updated
 - [ ] No compiler warnings
@@ -147,16 +147,16 @@ Before submitting a PR, ensure:
 
 ```bash
 # All tests
-task t
+just t
 
 # Unit tests only
-task tu
+just tu
 
 # Integration tests only
-task ti
+just ti
 
 # With coverage
-task cov
+just cov
 ```
 
 ### Writing Tests
@@ -203,7 +203,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"SearchBun"
 2. **Run all checks:**
 
    ```bash
-   task c  # format + clippy + tests
+   just c  # format + clippy + tests
    ```
 
 3. **Update documentation:**

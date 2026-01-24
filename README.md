@@ -45,7 +45,7 @@ curl -L https://github.com/kjanat/bun-docs-mcp-proxy/releases/latest/download/bu
 
 ```bash
 cargo install --git https://github.com/kjanat/bun-docs-mcp-proxy
-# or: task br
+# or: just br
 ```
 
 ### CLI Search Mode
@@ -109,18 +109,18 @@ Use with Zed, Claude Code, or any MCP client:
 
 ```bash
 # Development
-task c          # Run all checks (fmt + clippy + tests)
-task dev        # Watch mode (auto-rebuild)
-task ci         # Run CI checks locally
+just c          # Run all checks (fmt + clippy + tests)
+just dev        # Watch mode (auto-rebuild)
+just ci         # Run CI checks locally
 
 # Testing
-task t          # Unit tests
-task tio        # Integration tests
-task cov        # Coverage report
+just t          # Unit tests
+just tio        # Integration tests
+just cov        # Coverage report
 
 # Build
-task br         # Release build
-task build-all  # All platforms
+just br         # Release build
+just build-all  # All platforms
 ```
 
 See [INDEX.md](INDEX.md) for comprehensive command reference, architecture

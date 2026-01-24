@@ -13,45 +13,34 @@ JSON-RPC over stdout.
 
 ## Essential Commands
 
-### Task-based Workflow (Recommended)
+### Just-based Workflow (Recommended)
 
-This project uses [Task](https://taskfile.dev) for build automation with GitHub
-Actions integration.
+This project uses [just](https://just.systems) for build automation.
 
 ```bash
-# Quick start - Common tasks
-task br          # Build release binary
-task t           # Run all tests
-task c           # Run all checks (fmt + clippy + tests)
-task cov         # Generate HTML coverage report
+# Quick start - Common recipes
+just br          # Build release binary
+just t           # Run all tests
+just c           # Run all checks (fmt + clippy + tests)
+just cov         # Generate HTML coverage report
 
 # CI simulation (matches GitHub Actions)
-task ci          # Run CI checks locally
-task ci-lint     # Run lint checks
-task ci-coverage # Run coverage workflow
+just ci          # Run CI checks locally
+just ci-lint     # Run lint checks
+just ci-coverage # Run coverage workflow
 
 # Development
-task dev         # Watch mode (auto-rebuild on changes)
-task run         # Run proxy in debug mode
+just dev         # Watch mode (auto-rebuild on changes)
+just run         # Run proxy in debug mode
 
 # Version management (with safety prompts)
-task bump-patch  # Bump patch version (0.2.1 → 0.2.2)
-task bump-minor  # Bump minor version (0.2.1 → 0.3.0) [prompted]
-task bump-major  # Bump major version (0.2.1 → 1.0.0) [prompted]
+just bump-patch  # Bump patch version (0.2.1 → 0.2.2)
+just bump-minor  # Bump minor version (0.2.1 → 0.3.0) [prompted]
+just bump-major  # Bump major version (0.2.1 → 1.0.0) [prompted]
 
-# List all available tasks
-task --list-all
+# List all available recipes
+just --list
 ```
-
-**CI Environment**: In CI/CD pipelines, use `--yes` flag to skip prompts:
-
-```bash
-task --yes clean        # Auto-confirm in CI
-task --yes bump-major   # Skip breaking change prompt
-```
-
-**GitHub Actions Integration**: Tasks automatically use collapsible output
-groups (`::group::`) in GitHub Actions for cleaner CI logs.
 
 ### Build & Test (Raw Commands)
 
@@ -62,11 +51,11 @@ cargo build --release
 # Run all tests
 cargo test
 
-# Run tests with Task
-task t
+# Run tests with just
+just t
 
 # Generate coverage report (uses cargo-llvm-cov)
-task cov
+just cov
 
 # Run with debug logging
 RUST_LOG=debug ./target/release/bun-docs-mcp-proxy
@@ -203,17 +192,16 @@ stream → parse → stdout (JSON-RPC)
 ### Running Tests
 
 ```bash
-# With Task (Recommended)
-task t           # Run all tests
-task tu          # Run unit tests only
-task ti          # Run integration tests only
-task tn          # Run with nextest (faster, JUnit output)
-task cov         # Generate HTML coverage report
-task covt        # Show coverage summary in terminal
+# With just (Recommended)
+just t           # Run all tests
+just tu          # Run unit tests only
+just ti          # Run integration tests only
+just tn          # Run with nextest (faster, JUnit output)
+just cov         # Generate HTML coverage report
+just covt        # Show coverage summary in terminal
 
 # Raw commands
 cargo test
-make test
 cargo nextest run --all-features --workspace --profile ci
 # JUnit report saved to target/nextest/ci/junit.xml
 ```
@@ -259,14 +247,11 @@ Network issues or Bun API slowness may require adjustment.
 **CLI search returns empty**: Verify network connectivity to
 `https://bun.com/docs/mcp`. Check RUST_LOG=debug output for errors.
 
-**Task prompts fail in CI**: Tasks with `prompt:` (clean, bump-major,
-bump-minor, build-all-\*) require `--yes` flag in non-interactive environments:
+**Prompts fail in CI**: Recipes with `[confirm]` (clean, bump-major, bump-minor)
+require confirmation. In non-interactive environments, pipe `yes`:
 
 ```bash
 # CI/CD usage
-task --yes clean
-task --yes bump-major
+yes | just clean
+yes | just bump-major
 ```
-
-**GitHub Actions logs verbose**: Task automatically groups output using
-`::group::` syntax. Expand/collapse groups in Actions UI for cleaner logs.

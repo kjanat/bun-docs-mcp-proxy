@@ -1,21 +1,24 @@
 # https://just.systems
 # Converted from Taskfile.yml
-
 # Variables
+
 binary_name := "bun-docs-mcp-proxy"
 build_dir := "target/release"
 coverage_dir := "target/llvm-cov/html"
 doc_dir := "target/doc"
 
 # Dynamic variables (evaluated at runtime)
+
 current_version := `cargo pkgid | cut -d# -f2`
 commit_hash := `git rev-parse HEAD`
 build_time := `date -u +"%Y-%m-%dT%H:%M:%SZ"`
 
 # Environment
+
 export CARGO_TERM_COLOR := "always"
 
 # ===== Aliases =====
+
 alias br := build-release
 alias release := build-release
 alias t := test
@@ -56,8 +59,8 @@ build-release:
     @echo "Binary: {{ build_dir }}/{{ binary_name }}"
 
 # Remove build artifacts
-[group('build')]
 [confirm("Delete all build artifacts?")]
+[group('build')]
 clean:
     cargo clean
 
@@ -162,7 +165,7 @@ check: fmt-check clippy test
 # Run proxy in debug mode (MCP server)
 [group('run')]
 run *args:
-    RUST_LOG=debug cargo run {{ args }}
+    RUST_LOG=debug cargo run -- {{ args }}
 
 # Run proxy in release mode
 [group('run')]
@@ -255,13 +258,13 @@ build-linux-arm64-musl:
     cargo zigbuild --release --target aarch64-unknown-linux-musl
 
 # Build for all native platforms (current OS only)
-[group('cross-build')]
 [confirm("Build for ALL platforms? This will take several minutes.")]
+[group('cross-build')]
 build-all-native: build-linux-gnu
 
 # Build for all cross-compilation targets (requires Zig)
-[group('cross-build')]
 [confirm("Build for ALL platforms? This will take several minutes.")]
+[group('cross-build')]
 build-all-cross: build-linux-arm64 build-linux-musl build-linux-arm64-musl
 
 # ===== Release Packaging =====
@@ -366,14 +369,14 @@ bump-patch:
     cargo set-version --bump patch
 
 # Bump minor version (0.2.1 -> 0.3.0)
-[group('version')]
 [confirm("Bump minor version (new features)?")]
+[group('version')]
 bump-minor:
     cargo set-version --bump minor
 
 # Bump major version (0.2.1 -> 1.0.0)
-[group('version')]
 [confirm("Bump major version? This is a BREAKING change!")]
+[group('version')]
 bump-major:
     cargo set-version --bump major
 

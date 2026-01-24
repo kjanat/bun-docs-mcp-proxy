@@ -48,7 +48,7 @@ DO NOT REMOVE THIS COMMENT!
 - Migrate all tests from `tests/` to inline modules
 - Add AGENTS.md with project guidance for Claude Code
 - Normalize formatting across Cargo.toml, dprint, workflows, configs
-- Migrate README to Taskfile workflows
+- Migrate from Taskfile to justfile for build automation
 - Optimize CI workflow triggers with path filters
 - Configure rust-analyzer to enable all features
 
@@ -66,6 +66,7 @@ DO NOT REMOVE THIS COMMENT!
 - Old flat module structure (`src/main.rs`, `src/http.rs`, etc.)
 - `tests/` directory (migrated to inline modules)
 - TESTING.md and INDEX.md (consolidated into AGENTS.md)
+- Taskfile.yml (replaced by justfile)
 
 ## [0.3.0] - 2025-11-05
 
