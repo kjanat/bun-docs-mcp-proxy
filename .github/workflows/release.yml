@@ -79,8 +79,7 @@ jobs:
 
       - name: Install cargo-zigbuild
         if: matrix.platform.cross
-        uses: taiki-e/install-action@v2
-        with: { tool: cargo-zigbuild }
+        uses: taiki-e/install-action@cargo-zigbuild
 
       - name: Build with cargo-zigbuild
         if: matrix.platform.cross
