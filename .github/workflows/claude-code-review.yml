@@ -30,19 +30,8 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.x"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Install pre-commit
-        run: uv tool install pre-commit
-
-      - name: Run pre-commit hooks
-        run: pre-commit install --install-hooks
+      - name: Install tools
+        run: npm i -g lefthook dprint tombi && lefthook install
 
       - name: Run Claude Code Review
         id: claude-review
@@ -66,7 +55,7 @@ jobs:
             - Security concerns
             - Test coverage
 
-            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+            Use the repository's AGENTS.md for guidance on style and conventions. Be constructive and helpful in your feedback.
 
             Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
 
