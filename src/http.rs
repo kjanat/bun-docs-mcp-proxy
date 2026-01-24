@@ -15,6 +15,7 @@
 //! - For 429: uses `Retry-After` header if present, else exponential backoff.
 //! - For 5xx/network: exponential backoff (200 ms -> 400 ms -> 800 ms, capped at 1 s).
 
+use crate::constants::content_type;
 use crate::util::truncate_utf8;
 use anyhow::{Context as _, Result};
 use bytes::Bytes;
@@ -219,10 +220,10 @@ impl BunDocsClient {
             let rb = self
                 .client
                 .post(self.base_url.as_str())
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .header(reqwest::header::CONTENT_TYPE, content_type::JSON)
                 .header(
                     reqwest::header::ACCEPT,
-                    "application/json, text/event-stream",
+                    format!("{}, {}", content_type::JSON, content_type::SSE),
                 )
                 .json(&request)
                 .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS));
@@ -236,11 +237,11 @@ impl BunDocsClient {
                     );
 
                     let headers = response.headers().clone();
-                    let content_type = Self::main_content_type(&headers);
+                    let resp_content_type = Self::main_content_type(&headers);
 
                     if status.is_success() {
                         // Success: decide how to parse based on content type
-                        if content_type.starts_with("text/event-stream") {
+                        if resp_content_type.starts_with(content_type::SSE) {
                             debug!("Parsing SSE stream");
                             return self.parse_sse_response(response).await;
                         }
@@ -260,10 +261,10 @@ impl BunDocsClient {
                     let body_snippet = truncate_utf8(&body, MAX_ERROR_SNIPPET_SIZE);
                     let header_summary = Self::summarize_headers(&headers);
 
-                    let ct_display = if content_type.is_empty() {
+                    let ct_display = if resp_content_type.is_empty() {
                         "(none)"
                     } else {
-                        &content_type
+                        &resp_content_type
                     };
                     let error = anyhow::anyhow!(
                         "Bun Docs API error: status={status} content_type={ct_display} headers=[{header_summary}] body_snippet=\"{body_snippet}\""
@@ -413,7 +414,7 @@ impl BunDocsClient {
         let response = self
             .client
             .get(url)
-            .header(reqwest::header::ACCEPT, "text/markdown")
+            .header(reqwest::header::ACCEPT, content_type::MARKDOWN)
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
             .send()
             .await

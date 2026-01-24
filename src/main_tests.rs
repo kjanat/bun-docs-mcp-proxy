@@ -4,6 +4,7 @@
 #![allow(clippy::default_numeric_fallback, reason = "test literals")]
 
 use super::*;
+use crate::constants::{MCP_PROTOCOL_VERSION, SERVER_NAME};
 use serde_json::json;
 
 #[test]
@@ -12,11 +13,11 @@ fn test_handle_initialize() {
     let serialized = serde_json::to_value(&response).unwrap();
 
     assert_eq!(serialized["id"], 1);
-    assert_eq!(serialized["result"]["protocolVersion"], "2024-11-05");
     assert_eq!(
-        serialized["result"]["serverInfo"]["name"],
-        "bun-docs-mcp-proxy"
+        serialized["result"]["protocolVersion"],
+        MCP_PROTOCOL_VERSION
     );
+    assert_eq!(serialized["result"]["serverInfo"]["name"], SERVER_NAME);
     assert!(serialized["result"]["capabilities"]["tools"].is_object());
 }
 
@@ -109,7 +110,10 @@ fn test_initialize_response_version() {
     let serialized = serde_json::to_value(&response).unwrap();
 
     // Verify protocol version matches MCP spec
-    assert_eq!(serialized["result"]["protocolVersion"], "2024-11-05");
+    assert_eq!(
+        serialized["result"]["protocolVersion"],
+        MCP_PROTOCOL_VERSION
+    );
     // Verify both capabilities are present
     assert!(serialized["result"]["capabilities"]["tools"].is_object());
     assert!(serialized["result"]["capabilities"]["resources"].is_object());
@@ -673,10 +677,11 @@ fn test_parse_bun_docs_uri() {
 
 #[test]
 fn test_jsonrpc_error_code_constants() {
-    assert_eq!(JSONRPC_PARSE_ERROR, -32700);
-    assert_eq!(JSONRPC_INVALID_PARAMS, -32602);
-    assert_eq!(JSONRPC_INTERNAL_ERROR, -32603);
-    assert_eq!(JSONRPC_METHOD_NOT_FOUND, -32601);
+    use crate::constants::error_code;
+    assert_eq!(error_code::PARSE_ERROR, -32700);
+    assert_eq!(error_code::INVALID_PARAMS, -32602);
+    assert_eq!(error_code::INTERNAL_ERROR, -32603);
+    assert_eq!(error_code::METHOD_NOT_FOUND, -32601);
 }
 
 #[tokio::test]

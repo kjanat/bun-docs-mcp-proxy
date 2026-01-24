@@ -12,6 +12,7 @@
 //!
 //! Upstream transport: HTTP POST returning JSON or SSE; downstream transport: stdio JSON-RPC.
 
+mod constants;
 mod http;
 mod protocol;
 mod transport;
@@ -19,20 +20,15 @@ mod util;
 
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
+use constants::{
+    BUN_URI_HOST, BUN_URI_SCHEME, LINK_MARKER, MCP_PROTOCOL_VERSION, Method, SERVER_NAME,
+    content_type, error_code,
+};
 use core::fmt::Write as _;
 use protocol::{JsonRpcRequest, JsonRpcResponse};
 use std::fs;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
-
-/// Standard JSON-RPC 2.0 error code for parse errors (invalid JSON).
-const JSONRPC_PARSE_ERROR: i32 = -32700;
-/// Standard JSON-RPC 2.0 error code for invalid parameters.
-const JSONRPC_INVALID_PARAMS: i32 = -32602;
-/// Standard JSON-RPC 2.0 error code for internal errors.
-const JSONRPC_INTERNAL_ERROR: i32 = -32603;
-/// Standard JSON-RPC 2.0 error code for method not found errors.
-const JSONRPC_METHOD_NOT_FOUND: i32 = -32601;
 
 /// Output format for CLI search results
 #[derive(Debug, Clone, ValueEnum)]
@@ -182,9 +178,9 @@ fn parse_bun_docs_uri(uri: &str) -> Result<String, String> {
     let parsed =
         reqwest::Url::parse(uri).map_err(|e| format!("Invalid URI format: {uri} ({e})"))?;
 
-    if parsed.scheme() != "bun" || parsed.host_str() != Some("docs") {
+    if parsed.scheme() != BUN_URI_SCHEME || parsed.host_str() != Some(BUN_URI_HOST) {
         return Err(format!(
-            "Invalid URI format: expected bun://docs, got {uri}"
+            "Invalid URI format: expected {BUN_URI_SCHEME}://{BUN_URI_HOST}, got {uri}"
         ));
     }
 
@@ -266,7 +262,7 @@ fn extract_doc_entries(result: &serde_json::Value) -> Vec<DocEntry<'_>> {
             let url = text.lines().find_map(|line| {
                 let trimmed = line.trim();
                 trimmed
-                    .strip_prefix("Link: ")
+                    .strip_prefix(LINK_MARKER)
                     .map(|url_part| url_part.trim().to_owned())
             });
 
@@ -487,7 +483,7 @@ async fn main() -> Result<()> {
     // MCP server mode
     info!("Bun Docs MCP Proxy starting");
 
-    let mut transport = transport::StdioTransport::new();
+    let mut transport = transport::StdioTransport::stdio();
     let http_client = http::BunDocsClient::new();
 
     loop {
@@ -527,7 +523,7 @@ async fn main() -> Result<()> {
 
                 let error_response = JsonRpcResponse::error(
                     extracted_id,
-                    JSONRPC_PARSE_ERROR,
+                    error_code::PARSE_ERROR,
                     format!("Parse error: {e}"),
                 );
                 if let Ok(response_str) = serde_json::to_string(&error_response)
@@ -549,20 +545,27 @@ async fn main() -> Result<()> {
         info!("Received method: {}", request.method);
 
         // Handle request based on method
-        let response = match request.method.as_str() {
-            "tools/call" => handle_tools_call(&http_client, &request, request_id.clone()).await,
-            "tools/list" => handle_tools_list(request_id.clone()),
-            "resources/list" => handle_resources_list(request_id.clone()),
-            "resources/read" => {
+        let response = match request.method.parse::<Method>() {
+            Ok(Method::ToolsCall) => {
+                handle_tools_call(&http_client, &request, request_id.clone()).await
+            }
+            Ok(Method::ToolsList) => handle_tools_list(request_id.clone()),
+            Ok(Method::ResourcesList) => handle_resources_list(request_id.clone()),
+            Ok(Method::ResourcesRead) => {
                 handle_resources_read(&http_client, &request, request_id.clone()).await
             }
-            "initialize" => handle_initialize(request_id.clone()),
-            method => {
-                error!("Unsupported method: {}", method);
+            Ok(Method::Initialize) => handle_initialize(request_id.clone()),
+            Ok(Method::NotificationsInitialized) => {
+                // This shouldn't happen since notifications have no id, but handle gracefully
+                debug!("Unexpected notifications/initialized with id");
+                continue;
+            }
+            Err(()) => {
+                error!("Unsupported method: {}", request.method);
                 JsonRpcResponse::error(
                     request_id,
-                    JSONRPC_METHOD_NOT_FOUND,
-                    format!("Method not found: {method}"),
+                    error_code::METHOD_NOT_FOUND,
+                    format!("Method not found: {}", request.method),
                 )
             }
         };
@@ -635,7 +638,7 @@ async fn handle_tools_call(
             error!("Failed to forward request: {}", e);
             JsonRpcResponse::error(
                 request_id,
-                JSONRPC_INTERNAL_ERROR,
+                error_code::INTERNAL_ERROR,
                 format!("Internal error: {e}"),
             )
         }
@@ -686,10 +689,10 @@ fn handle_resources_list(request_id: serde_json::Value) -> JsonRpcResponse {
     // Return available resources
     let resources = serde_json::json!({
         "resources": [{
-            "uri": "bun://docs",
+            "uri": format!("{BUN_URI_SCHEME}://{BUN_URI_HOST}"),
             "name": "Bun Documentation",
             "description": "Search and browse Bun documentation",
-            "mimeType": "application/json"
+            "mimeType": content_type::JSON
         }]
     });
 
@@ -718,7 +721,7 @@ async fn handle_resources_read(
     let Some(params) = &request.params else {
         return JsonRpcResponse::error(
             request_id,
-            JSONRPC_INVALID_PARAMS,
+            error_code::INVALID_PARAMS,
             "Missing params".to_owned(),
         );
     };
@@ -727,7 +730,7 @@ async fn handle_resources_read(
     let uri = match get_string_param(params, "uri") {
         Ok(u) => u,
         Err(msg) => {
-            return JsonRpcResponse::error(request_id, JSONRPC_INVALID_PARAMS, msg);
+            return JsonRpcResponse::error(request_id, error_code::INVALID_PARAMS, msg);
         }
     };
 
@@ -735,7 +738,7 @@ async fn handle_resources_read(
     let query = match parse_bun_docs_uri(uri) {
         Ok(q) => q,
         Err(msg) => {
-            return JsonRpcResponse::error(request_id, JSONRPC_INVALID_PARAMS, msg);
+            return JsonRpcResponse::error(request_id, error_code::INVALID_PARAMS, msg);
         }
     };
 
@@ -765,7 +768,7 @@ async fn handle_resources_read(
                     error!("Failed to serialize resource content: {}", e);
                     return JsonRpcResponse::error(
                         request_id,
-                        JSONRPC_INTERNAL_ERROR,
+                        error_code::INTERNAL_ERROR,
                         format!("Failed to serialize resource: {e}"),
                     );
                 }
@@ -775,7 +778,7 @@ async fn handle_resources_read(
             let resource_response = serde_json::json!({
                 "contents": [{
                     "uri": uri,
-                    "mimeType": "application/json",
+                    "mimeType": content_type::JSON,
                     "text": text
                 }]
             });
@@ -786,7 +789,7 @@ async fn handle_resources_read(
             error!("Failed to read resource: {}", e);
             JsonRpcResponse::error(
                 request_id,
-                JSONRPC_INTERNAL_ERROR,
+                error_code::INTERNAL_ERROR,
                 format!("Internal error: {e}"),
             )
         }
@@ -804,13 +807,13 @@ async fn handle_resources_read(
 fn handle_initialize(request_id: serde_json::Value) -> JsonRpcResponse {
     // Handle MCP initialize request
     let init_result = serde_json::json!({
-        "protocolVersion": "2024-11-05",
+        "protocolVersion": MCP_PROTOCOL_VERSION,
         "capabilities": {
             "tools": {},
             "resources": {}
         },
         "serverInfo": {
-            "name": "bun-docs-mcp-proxy",
+            "name": SERVER_NAME,
             "version": env!("CARGO_PKG_VERSION")
         }
     });

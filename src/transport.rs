@@ -10,37 +10,47 @@
 
 use crate::util::truncate_utf8;
 use anyhow::{Context as _, Result};
-use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
+use tokio::io::{AsyncBufReadExt as _, AsyncRead, AsyncWrite, AsyncWriteExt as _, BufReader};
 use tracing::debug;
 
 /// The maximum length of messages (in bytes) to display in debug logs.
 /// Messages longer than this will be truncated for readability.
 const DEBUG_MESSAGE_MAX_LEN: usize = 80_usize;
 
-/// Stdio-based transport for JSON-RPC communication
-pub struct StdioTransport {
-    /// A buffered reader for asynchronous input from `stdin`.
-    stdin: BufReader<tokio::io::Stdin>,
-    /// An asynchronous writer for output to `stdout`.
-    stdout: tokio::io::Stdout,
+/// Generic transport for JSON-RPC communication over async streams.
+///
+/// This struct is parameterized over:
+/// - `R`: An async reader implementing `AsyncRead + Unpin`
+/// - `W`: An async writer implementing `AsyncWrite + Unpin`
+///
+/// The reader is internally wrapped in a `BufReader` for efficient line-based reading.
+pub struct Transport<R, W> {
+    /// A buffered reader for asynchronous input.
+    reader: BufReader<R>,
+    /// An asynchronous writer for output.
+    writer: W,
 }
 
-impl Default for StdioTransport {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl StdioTransport {
-    /// Create a new stdio transport
+impl<R, W> Transport<R, W>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    /// Create a new transport from raw reader and writer.
+    ///
+    /// The reader will be wrapped in a `BufReader` for efficient line-based reading.
+    ///
+    /// # Arguments
+    /// * `reader` - Async reader (will be wrapped in `BufReader`)
+    /// * `writer` - Async writer
     ///
     /// # Returns
-    /// New `StdioTransport` instance connected to process stdin/stdout
+    /// New `Transport` instance
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(reader: R, writer: W) -> Self {
         Self {
-            stdin: BufReader::new(tokio::io::stdin()),
-            stdout: tokio::io::stdout(),
+            reader: BufReader::new(reader),
+            writer,
         }
     }
 
@@ -49,7 +59,7 @@ impl StdioTransport {
         truncate_utf8(message, DEBUG_MESSAGE_MAX_LEN)
     }
 
-    /// Read a message from stdin
+    /// Read a message from the input stream.
     ///
     /// Loops until a non-empty line is read or EOF is reached. Empty/whitespace-only
     /// lines are silently skipped.
@@ -59,18 +69,18 @@ impl StdioTransport {
     /// - `Ok(None)` - EOF (client disconnected)
     ///
     /// # Errors
-    /// Returns an error if reading from stdin fails
+    /// Returns an error if reading from the input stream fails
     pub async fn read_message(&mut self) -> Result<Option<String>> {
         loop {
             let mut line = String::new();
             let bytes_read = self
-                .stdin
+                .reader
                 .read_line(&mut line)
                 .await
-                .context("Failed to read from stdin")?;
+                .context("Failed to read from input")?;
 
             if bytes_read == 0_usize {
-                debug!("EOF on stdin");
+                debug!("EOF on input");
                 return Ok(None);
             }
 
@@ -85,34 +95,54 @@ impl StdioTransport {
         }
     }
 
-    /// Write a message to stdout
+    /// Write a message to the output stream.
     ///
-    /// Writes the message followed by a newline, then flushes stdout.
+    /// Writes the message followed by a newline, then flushes the output.
     ///
     /// # Arguments
     /// * `message` - Message to write (newline will be added)
     ///
     /// # Errors
-    /// Returns an error if writing to or flushing stdout fails
+    /// Returns an error if writing to or flushing the output stream fails
     pub async fn write_message(&mut self, message: &str) -> Result<()> {
         debug!("Writing message: {}...", Self::truncate_for_debug(message));
 
-        self.stdout
+        self.writer
             .write_all(message.as_bytes())
             .await
-            .context("Failed to write to stdout")?;
+            .context("Failed to write to output")?;
 
-        self.stdout
+        self.writer
             .write_all(b"\n")
             .await
-            .context("Failed to write newline to stdout")?;
+            .context("Failed to write newline to output")?;
 
-        self.stdout
+        self.writer
             .flush()
             .await
-            .context("Failed to flush stdout")?;
+            .context("Failed to flush output")?;
 
         Ok(())
+    }
+}
+
+/// Convenience type alias for stdio-based transport.
+pub type StdioTransport = Transport<tokio::io::Stdin, tokio::io::Stdout>;
+
+impl StdioTransport {
+    /// Create a new stdio transport connected to process stdin/stdout.
+    ///
+    /// # Returns
+    /// New `StdioTransport` instance connected to process stdin/stdout
+    #[must_use]
+    pub fn stdio() -> Self {
+        Transport::new(tokio::io::stdin(), tokio::io::stdout())
+    }
+}
+
+impl Default for StdioTransport {
+    fn default() -> Self {
+        Self::stdio()
     }
 }
 
@@ -121,10 +151,118 @@ impl StdioTransport {
 #[allow(clippy::unwrap_used, reason = "tests can use unwrap()")]
 mod tests {
     use super::*;
+    use std::io::Cursor;
+
+    /// Helper type for in-memory transport testing.
+    type TestTransport = Transport<Cursor<Vec<u8>>, Vec<u8>>;
+
+    /// Create a test transport with predefined input.
+    fn test_transport(input: &str) -> TestTransport {
+        Transport::new(Cursor::new(input.as_bytes().to_vec()), Vec::new())
+    }
+
+    #[tokio::test]
+    async fn read_single_message() {
+        let mut transport = test_transport("hello world\n");
+        let msg = transport.read_message().await.unwrap();
+        assert_eq!(msg, Some("hello world".to_owned()));
+    }
+
+    #[tokio::test]
+    async fn read_multiple_messages() {
+        let mut transport = test_transport("first\nsecond\nthird\n");
+
+        assert_eq!(
+            transport.read_message().await.unwrap(),
+            Some("first".to_owned())
+        );
+        assert_eq!(
+            transport.read_message().await.unwrap(),
+            Some("second".to_owned())
+        );
+        assert_eq!(
+            transport.read_message().await.unwrap(),
+            Some("third".to_owned())
+        );
+        assert_eq!(transport.read_message().await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn read_skips_empty_lines() {
+        let mut transport = test_transport("\n\n\nhello\n\n\n");
+        let msg = transport.read_message().await.unwrap();
+        assert_eq!(msg, Some("hello".to_owned()));
+    }
+
+    #[tokio::test]
+    async fn read_skips_whitespace_only_lines() {
+        let mut transport = test_transport("   \n\t\t\n  \t  \nmessage\n");
+        let msg = transport.read_message().await.unwrap();
+        assert_eq!(msg, Some("message".to_owned()));
+    }
+
+    #[tokio::test]
+    async fn read_trims_whitespace() {
+        let mut transport = test_transport("  trimmed message  \n");
+        let msg = transport.read_message().await.unwrap();
+        assert_eq!(msg, Some("trimmed message".to_owned()));
+    }
+
+    #[tokio::test]
+    async fn read_eof_returns_none() {
+        let mut transport = test_transport("");
+        let msg = transport.read_message().await.unwrap();
+        assert_eq!(msg, None);
+    }
+
+    #[tokio::test]
+    async fn read_eof_after_empty_lines() {
+        let mut transport = test_transport("\n\n\n");
+        let msg = transport.read_message().await.unwrap();
+        assert_eq!(msg, None);
+    }
+
+    #[tokio::test]
+    async fn write_appends_newline() {
+        let mut transport = test_transport("");
+        transport.write_message("hello").await.unwrap();
+        assert_eq!(transport.writer, b"hello\n");
+    }
+
+    #[tokio::test]
+    async fn write_multiple_messages() {
+        let mut transport = test_transport("");
+        transport.write_message("first").await.unwrap();
+        transport.write_message("second").await.unwrap();
+        assert_eq!(transport.writer, b"first\nsecond\n");
+    }
+
+    #[tokio::test]
+    async fn write_empty_message() {
+        let mut transport = test_transport("");
+        transport.write_message("").await.unwrap();
+        assert_eq!(transport.writer, b"\n");
+    }
+
+    #[tokio::test]
+    async fn roundtrip_json_message() {
+        let json = r#"{"jsonrpc":"2.0","id":1,"method":"test"}"#;
+        let mut transport = test_transport(&format!("{json}\n"));
+
+        let read = transport.read_message().await.unwrap().unwrap();
+        assert_eq!(read, json);
+
+        transport.write_message(&read).await.unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&transport.writer),
+            format!("{json}\n")
+        );
+    }
 
     #[test]
-    fn new_transport_creation() {
-        let _transport = StdioTransport::new();
+    fn stdio_transport_creation() {
+        // Just verify the type alias compiles and stdio() works
+        let _transport: StdioTransport = StdioTransport::stdio();
     }
 
     #[test]
@@ -133,96 +271,23 @@ mod tests {
     }
 
     #[test]
-    fn truncate_for_debug() {
+    fn truncate_for_debug_short() {
         let short = "short message";
-        assert_eq!(StdioTransport::truncate_for_debug(short), short);
+        assert_eq!(
+            Transport::<Cursor<Vec<u8>>, Vec<u8>>::truncate_for_debug(short),
+            short
+        );
+    }
 
+    #[test]
+    fn truncate_for_debug_long() {
         let long = "a".repeat(100_usize);
-        let truncated = StdioTransport::truncate_for_debug(&long);
+        let truncated = Transport::<Cursor<Vec<u8>>, Vec<u8>>::truncate_for_debug(&long);
         assert_eq!(truncated.len(), DEBUG_MESSAGE_MAX_LEN);
     }
 
     #[test]
     fn debug_message_max_len_constant() {
         assert_eq!(DEBUG_MESSAGE_MAX_LEN, 80_usize);
-    }
-
-    #[test]
-    fn read_message_logic() {
-        // Test line reading and trimming logic
-        let line_with_newline = "test message\n";
-        let trimmed = line_with_newline.trim();
-        assert_eq!(trimmed, "test message");
-        assert!(!trimmed.is_empty());
-    }
-
-    #[test]
-    fn eof_detection() {
-        // Zero bytes read simulates EOF
-        let bytes_read = 0_usize;
-        assert_eq!(bytes_read, 0_usize);
-    }
-
-    #[test]
-    fn write_message_format() {
-        // Test message formatting logic
-        let message = "test output";
-        let with_newline = format!("{message}\n");
-
-        assert_eq!(with_newline, "test output\n");
-        assert!(with_newline.ends_with('\n'));
-        assert_eq!(with_newline.len(), message.len() + 1_usize);
-    }
-
-    #[test]
-    fn message_truncation_logic() {
-        let long_message = "a".repeat(100_usize);
-        let truncated = long_message
-            .get(..long_message.len().min(80_usize))
-            .expect("valid slice within bounds");
-        assert_eq!(truncated.len(), 80_usize);
-    }
-
-    #[test]
-    fn trim_behavior() {
-        let message_with_whitespace = "  test message  \n";
-        let trimmed = message_with_whitespace.trim();
-        assert_eq!(trimmed, "test message");
-    }
-
-    #[test]
-    fn empty_line_detection() {
-        let empty = "";
-        let whitespace_only = "   \n";
-        let non_empty = "message";
-
-        assert!(empty.trim().is_empty());
-        assert!(whitespace_only.trim().is_empty());
-        assert!(!non_empty.trim().is_empty());
-    }
-
-    #[test]
-    fn newline_bytes() {
-        let newline = b"\n";
-        assert_eq!(newline.len(), 1_usize);
-        assert_eq!(newline.first().expect("newline has one byte"), &10_u8);
-    }
-
-    #[test]
-    fn message_format() {
-        let message = "test message";
-        let with_newline = format!("{message}\n");
-        assert_eq!(with_newline, "test message\n");
-        assert!(with_newline.ends_with('\n'));
-    }
-
-    #[test]
-    fn string_length_safety() {
-        let short = "test";
-        let long = "a".repeat(200_usize);
-        let short_min = short.len().min(80_usize);
-        let long_min = long.len().min(80_usize);
-        assert_eq!(short_min, 4_usize);
-        assert_eq!(long_min, 80_usize);
     }
 }
