@@ -38,13 +38,19 @@ use serde_json::Value;
 const JSONRPC_VERSION: &str = "2.0";
 
 /// JSON-RPC 2.0 request structure
+///
+/// Per JSON-RPC 2.0 spec:
+/// - Requests have an `id` field (string, number, or null)
+/// - Notifications omit the `id` field entirely (no response expected)
 #[derive(Debug, Deserialize)]
 pub struct JsonRpcRequest {
     /// Protocol version (must be "2.0")
     #[allow(dead_code, reason = "field required for protocol compliance")]
     pub jsonrpc: String,
     /// Request identifier (can be string, number, or null)
-    pub id: Value,
+    /// None indicates a notification (no response expected per JSON-RPC 2.0)
+    #[serde(default)]
+    pub id: Option<Value>,
     /// Method name to invoke
     pub method: String,
     /// Optional method parameters
@@ -198,7 +204,7 @@ mod tests {
         let request: JsonRpcRequest =
             serde_json::from_str(json_str).expect("valid JSON-RPC request should parse");
         assert_eq!(request.jsonrpc, "2.0");
-        assert_eq!(request.id, json!(1_i32));
+        assert_eq!(request.id, Some(json!(1_i32)));
         assert_eq!(request.method, "tools/list");
         assert!(request.params.is_some());
     }
@@ -215,6 +221,38 @@ mod tests {
             serde_json::from_str(json_str).expect("valid JSON-RPC request should parse");
         assert_eq!(request.method, "initialize");
         assert!(request.params.is_none());
+    }
+
+    #[test]
+    fn deserialize_jsonrpc_notification() {
+        // JSON-RPC 2.0 notifications have no id field
+        let json_str = r#"{
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized"
+        }"#;
+
+        let request: JsonRpcRequest =
+            serde_json::from_str(json_str).expect("valid JSON-RPC notification should parse");
+        assert_eq!(request.jsonrpc, "2.0");
+        assert!(request.id.is_none(), "notifications should have no id");
+        assert_eq!(request.method, "notifications/initialized");
+        assert!(request.params.is_none());
+    }
+
+    #[test]
+    fn deserialize_jsonrpc_notification_with_params() {
+        // JSON-RPC 2.0 notifications can have params
+        let json_str = r#"{
+            "jsonrpc": "2.0",
+            "method": "notifications/progress",
+            "params": {"progress": 50}
+        }"#;
+
+        let request: JsonRpcRequest =
+            serde_json::from_str(json_str).expect("valid JSON-RPC notification should parse");
+        assert!(request.id.is_none(), "notifications should have no id");
+        assert_eq!(request.method, "notifications/progress");
+        assert!(request.params.is_some());
     }
 
     #[test]

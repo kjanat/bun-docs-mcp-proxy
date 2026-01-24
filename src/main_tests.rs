@@ -8,14 +8,7 @@ use serde_json::json;
 
 #[test]
 fn test_handle_initialize() {
-    let request = JsonRpcRequest {
-        jsonrpc: "2.0".to_owned(),
-        id: json!(1),
-        method: "initialize".to_owned(),
-        params: None,
-    };
-
-    let response = handle_initialize(&request);
+    let response = handle_initialize(json!(1));
     let serialized = serde_json::to_value(&response).unwrap();
 
     assert_eq!(serialized["id"], 1);
@@ -29,14 +22,7 @@ fn test_handle_initialize() {
 
 #[test]
 fn test_handle_tools_list() {
-    let request = JsonRpcRequest {
-        jsonrpc: "2.0".to_owned(),
-        id: json!("test-id"),
-        method: "tools/list".to_owned(),
-        params: None,
-    };
-
-    let response = handle_tools_list(&request);
+    let response = handle_tools_list(json!("test-id"));
     let serialized = serde_json::to_value(&response).unwrap();
 
     assert_eq!(serialized["id"], "test-id");
@@ -59,7 +45,7 @@ fn test_parse_valid_jsonrpc_request() {
     assert!(request.is_ok());
     let req = request.unwrap();
     assert_eq!(req.method, "initialize");
-    assert_eq!(req.id, json!(1));
+    assert_eq!(req.id, Some(json!(1)));
 }
 
 #[test]
@@ -101,14 +87,7 @@ fn test_response_serialization() {
 
 #[test]
 fn test_handle_tools_list_structure() {
-    let request = JsonRpcRequest {
-        jsonrpc: "2.0".to_owned(),
-        id: json!(1),
-        method: "tools/list".to_owned(),
-        params: None,
-    };
-
-    let response = handle_tools_list(&request);
+    let response = handle_tools_list(json!(1));
     let serialized = serde_json::to_value(&response).unwrap();
 
     // Verify required fields
@@ -126,14 +105,7 @@ fn test_handle_tools_list_structure() {
 
 #[test]
 fn test_initialize_response_version() {
-    let request = JsonRpcRequest {
-        jsonrpc: "2.0".to_owned(),
-        id: json!(1),
-        method: "initialize".to_owned(),
-        params: None,
-    };
-
-    let response = handle_initialize(&request);
+    let response = handle_initialize(json!(1));
     let serialized = serde_json::to_value(&response).unwrap();
 
     // Verify protocol version matches MCP spec
@@ -145,14 +117,7 @@ fn test_initialize_response_version() {
 
 #[test]
 fn test_handle_resources_list() {
-    let request = JsonRpcRequest {
-        jsonrpc: "2.0".to_owned(),
-        id: json!("res-list"),
-        method: "resources/list".to_owned(),
-        params: None,
-    };
-
-    let response = handle_resources_list(&request);
+    let response = handle_resources_list(json!("res-list"));
     let serialized = serde_json::to_value(&response).unwrap();
 
     assert_eq!(serialized["id"], "res-list");
@@ -201,7 +166,7 @@ async fn test_handle_tools_call_mocked() {
     let client = http::BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
     let request = JsonRpcRequest {
         jsonrpc: "2.0".to_owned(),
-        id: json!(1),
+        id: Some(json!(1)),
         method: "tools/call".to_owned(),
         params: Some(json!({
             "name": "SearchBun",
@@ -211,7 +176,7 @@ async fn test_handle_tools_call_mocked() {
         })),
     };
 
-    let response = handle_tools_call(&client, &request).await;
+    let response = handle_tools_call(&client, &request, json!(1)).await;
     let serialized = serde_json::to_value(&response).unwrap();
 
     mock.assert_async().await;
@@ -243,12 +208,12 @@ async fn test_handle_resources_read_mocked() {
     let client = http::BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
     let request = JsonRpcRequest {
         jsonrpc: "2.0".to_owned(),
-        id: json!("res-mock"),
+        id: Some(json!("res-mock")),
         method: "resources/read".to_owned(),
         params: Some(json!({"uri": "bun://docs?query=HTTP"})),
     };
 
-    let response = handle_resources_read(&client, &request).await;
+    let response = handle_resources_read(&client, &request, json!("res-mock")).await;
     let serialized = serde_json::to_value(&response).unwrap();
 
     mock.assert_async().await;
@@ -273,7 +238,7 @@ async fn test_handle_tools_call_real_api() {
     let client = http::BunDocsClient::new();
     let request = JsonRpcRequest {
         jsonrpc: "2.0".to_owned(),
-        id: json!(1),
+        id: Some(json!(1)),
         method: "tools/call".to_owned(),
         params: Some(json!({
             "name": "SearchBun",
@@ -283,7 +248,7 @@ async fn test_handle_tools_call_real_api() {
         })),
     };
 
-    let response = handle_tools_call(&client, &request).await;
+    let response = handle_tools_call(&client, &request, json!(1)).await;
     let serialized = serde_json::to_value(&response).unwrap();
 
     assert!(serialized["result"].is_object());
@@ -299,7 +264,7 @@ async fn test_handle_tools_call_empty_query() {
     let client = http::BunDocsClient::new();
     let request = JsonRpcRequest {
         jsonrpc: "2.0".to_owned(),
-        id: json!(2),
+        id: Some(json!(2)),
         method: "tools/call".to_owned(),
         params: Some(json!({
             "name": "SearchBun",
@@ -309,7 +274,7 @@ async fn test_handle_tools_call_empty_query() {
         })),
     };
 
-    let response = handle_tools_call(&client, &request).await;
+    let response = handle_tools_call(&client, &request, json!(2)).await;
     let serialized = serde_json::to_value(&response).unwrap();
 
     // Proxy should forward successfully; Bun API decides what empty query means
@@ -322,12 +287,12 @@ async fn test_handle_resources_read_with_query() {
     let client = http::BunDocsClient::new();
     let request = JsonRpcRequest {
         jsonrpc: "2.0".to_owned(),
-        id: json!("res1"),
+        id: Some(json!("res1")),
         method: "resources/read".to_owned(),
         params: Some(json!({"uri": "bun://docs?query=Bun.serve"})),
     };
 
-    let response = handle_resources_read(&client, &request).await;
+    let response = handle_resources_read(&client, &request, json!("res1")).await;
     let serialized = serde_json::to_value(&response).unwrap();
 
     assert!(serialized["result"]["contents"].is_array());
@@ -346,12 +311,12 @@ async fn test_handle_resources_read_empty_query() {
     let client = http::BunDocsClient::new();
     let request = JsonRpcRequest {
         jsonrpc: "2.0".to_owned(),
-        id: json!("res2"),
+        id: Some(json!("res2")),
         method: "resources/read".to_owned(),
         params: Some(json!({"uri": "bun://docs"})),
     };
 
-    let response = handle_resources_read(&client, &request).await;
+    let response = handle_resources_read(&client, &request, json!("res2")).await;
     let serialized = serde_json::to_value(&response).unwrap();
 
     assert!(serialized["result"]["contents"].is_array());
@@ -362,12 +327,12 @@ async fn test_handle_resources_read_missing_params() {
     let client = http::BunDocsClient::new();
     let request = JsonRpcRequest {
         jsonrpc: "2.0".to_owned(),
-        id: json!("res3"),
+        id: Some(json!("res3")),
         method: "resources/read".to_owned(),
         params: None,
     };
 
-    let response = handle_resources_read(&client, &request).await;
+    let response = handle_resources_read(&client, &request, json!("res3")).await;
     let serialized = serde_json::to_value(&response).unwrap();
 
     assert!(serialized["error"].is_object());
@@ -385,12 +350,12 @@ async fn test_handle_resources_read_invalid_uri() {
     let client = http::BunDocsClient::new();
     let request = JsonRpcRequest {
         jsonrpc: "2.0".to_owned(),
-        id: json!("res4"),
+        id: Some(json!("res4")),
         method: "resources/read".to_owned(),
         params: Some(json!({"uri": "invalid://uri"})),
     };
 
-    let response = handle_resources_read(&client, &request).await;
+    let response = handle_resources_read(&client, &request, json!("res4")).await;
     let serialized = serde_json::to_value(&response).unwrap();
 
     assert!(serialized["error"].is_object());
@@ -408,12 +373,12 @@ async fn test_handle_resources_read_missing_uri_param() {
     let client = http::BunDocsClient::new();
     let request = JsonRpcRequest {
         jsonrpc: "2.0".to_owned(),
-        id: json!("res5"),
+        id: Some(json!("res5")),
         method: "resources/read".to_owned(),
         params: Some(json!({"other": "value"})),
     };
 
-    let response = handle_resources_read(&client, &request).await;
+    let response = handle_resources_read(&client, &request, json!("res5")).await;
     let serialized = serde_json::to_value(&response).unwrap();
 
     assert!(serialized["error"].is_object());
@@ -432,12 +397,12 @@ async fn test_handle_resources_read_with_real_search() {
     let client = http::BunDocsClient::new();
     let request = JsonRpcRequest {
         jsonrpc: "2.0".to_owned(),
-        id: json!("res6"),
+        id: Some(json!("res6")),
         method: "resources/read".to_owned(),
         params: Some(json!({"uri": "bun://docs?query=HTTP"})),
     };
 
-    let response = handle_resources_read(&client, &request).await;
+    let response = handle_resources_read(&client, &request, json!("res6")).await;
     let serialized = serde_json::to_value(&response).unwrap();
 
     // Real API should return valid results
@@ -456,7 +421,7 @@ fn test_init_logging_execution() {
 
     // Either succeeds or panics (already initialized) - both are fine
     // This just ensures the function code path is exercised
-    let _ = result;
+    drop(result);
 }
 
 #[test]
@@ -913,7 +878,7 @@ async fn test_handle_tools_call_with_network_error() {
     let client = http::BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
     let request = JsonRpcRequest {
         jsonrpc: "2.0".to_owned(),
-        id: json!(1),
+        id: Some(json!(1)),
         method: "tools/call".to_owned(),
         params: Some(json!({
             "name": "SearchBun",
@@ -921,7 +886,7 @@ async fn test_handle_tools_call_with_network_error() {
         })),
     };
 
-    let response = handle_tools_call(&client, &request).await;
+    let response = handle_tools_call(&client, &request, json!(1)).await;
     let serialized = serde_json::to_value(&response).unwrap();
 
     drop(server);
@@ -990,4 +955,106 @@ async fn test_format_markdown_with_url_and_fetch_success() {
         "Should preserve full MDX content"
     );
     // Verifies src/main.rs lines 292-298: successful fetch with source comment
+}
+
+// ============================================================================
+// truncate_for_log tests
+// ============================================================================
+
+#[test]
+fn test_truncate_for_log_short_string() {
+    let result = truncate_for_log("hello", 10);
+    assert_eq!(result, "hello");
+}
+
+#[test]
+fn test_truncate_for_log_exact_length() {
+    let result = truncate_for_log("hello", 5);
+    assert_eq!(result, "hello");
+}
+
+#[test]
+fn test_truncate_for_log_long_string() {
+    let result = truncate_for_log("hello world", 5);
+    assert_eq!(result, "hello...");
+}
+
+#[test]
+fn test_truncate_for_log_empty_string() {
+    let result = truncate_for_log("", 10);
+    assert_eq!(result, "");
+}
+
+// ============================================================================
+// extract_id_from_json tests
+// ============================================================================
+
+#[test]
+fn test_extract_id_from_valid_json_numeric() {
+    let json = r#"{"jsonrpc":"2.0","id":123,"method":"test"}"#;
+    let id = extract_id_from_json(json);
+    assert_eq!(id, json!(123));
+}
+
+#[test]
+fn test_extract_id_from_valid_json_string() {
+    let json = r#"{"jsonrpc":"2.0","id":"request-1","method":"test"}"#;
+    let id = extract_id_from_json(json);
+    assert_eq!(id, json!("request-1"));
+}
+
+#[test]
+fn test_extract_id_from_valid_json_null() {
+    let json = r#"{"jsonrpc":"2.0","id":null,"method":"test"}"#;
+    let id = extract_id_from_json(json);
+    assert_eq!(id, serde_json::Value::Null);
+}
+
+#[test]
+fn test_extract_id_from_malformed_json_numeric() {
+    // Malformed JSON (missing closing brace) but has id
+    let json = r#"{"jsonrpc":"2.0","id":456,"method":"test"#;
+    let id = extract_id_from_json(json);
+    assert_eq!(id, json!(456));
+}
+
+#[test]
+fn test_extract_id_from_malformed_json_string() {
+    // Malformed JSON but has string id
+    let json = r#"{"jsonrpc":"2.0","id":"my-id","method":"test"#;
+    let id = extract_id_from_json(json);
+    assert_eq!(id, json!("my-id"));
+}
+
+#[test]
+fn test_extract_id_from_json_no_id_field() {
+    let json = r#"{"jsonrpc":"2.0","method":"notification"}"#;
+    let id = extract_id_from_json(json);
+    assert_eq!(id, serde_json::Value::Null);
+}
+
+#[test]
+fn test_extract_id_from_empty_string() {
+    let id = extract_id_from_json("");
+    assert_eq!(id, serde_json::Value::Null);
+}
+
+#[test]
+fn test_extract_id_from_garbage() {
+    let id = extract_id_from_json("not json at all");
+    assert_eq!(id, serde_json::Value::Null);
+}
+
+#[test]
+fn test_extract_id_with_whitespace() {
+    let json = r#"{"jsonrpc": "2.0", "id" : 789 , "method": "test"}"#;
+    let id = extract_id_from_json(json);
+    assert_eq!(id, json!(789));
+}
+
+#[test]
+fn test_extract_id_negative_number() {
+    let json = r#"{"jsonrpc":"2.0","id":-42,"method":"test"}"#;
+    let id = extract_id_from_json(json);
+    assert_eq!(id, json!(-42));
 }

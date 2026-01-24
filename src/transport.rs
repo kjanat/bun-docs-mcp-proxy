@@ -1,26 +1,14 @@
-//! Stdio transport layer for JSON-RPC communication
+//! Stdio transport for newline-delimited JSON-RPC.
 //!
-//! This module provides an async stdio transport for reading JSON-RPC requests from stdin
-//! and writing JSON-RPC responses to stdout. It's designed for use with MCP (Model Context
-//! Protocol) clients that communicate over stdio, such as the Zed editor.
+//! Contract:
+//! - One JSON-RPC message per line (newline-delimited JSON).
+//! - Empty/whitespace-only lines are ignored (looped over internally).
+//! - `read_message()` returns `Ok(None)` **only** on EOF.
+//! - EOF means the client disconnected.
 //!
-//! ## Message Format
-//!
-//! - Messages are newline-delimited JSON (one JSON-RPC message per line)
-//! - Empty lines are ignored
-//! - EOF on stdin signals connection closure
-//!
-//! ## Logging
-//!
-//! All logging goes to stderr (not stdout) to avoid interfering with JSON-RPC messages.
-//! Long messages are truncated to [`DEBUG_MESSAGE_MAX_LEN`] characters in debug logs.
-//!
-//! ## Test Coverage Note
-//!
-//! Coverage for this module is lower (~56%) because `read_message` and `write_message`
-//! are tightly coupled to real stdin/stdout types, making them difficult to unit test.
-//! They are tested through integration tests and manual testing with the actual binary.
+//! Logging goes to stderr so stdout remains clean JSON-RPC.
 
+use crate::util::truncate_utf8;
 use anyhow::{Context as _, Result};
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tracing::debug;
@@ -56,62 +44,45 @@ impl StdioTransport {
         }
     }
 
-    /// Truncates a string to `DEBUG_MESSAGE_MAX_LEN` bytes, ensuring that the truncation
-    /// occurs on a UTF-8 character boundary to prevent invalid UTF-8 sequences.
-    ///
-    /// This is used for debug logging to keep log messages concise.
-    ///
-    /// # Arguments
-    /// * `message` - The string slice to truncate.
-    ///
-    /// # Returns
-    /// A string slice (`&str`) that is a valid UTF-8 truncation of the input `message`.
+    /// Truncates a string to `DEBUG_MESSAGE_MAX_LEN` bytes for debug logging.
     fn truncate_for_debug(message: &str) -> &str {
-        if message.len() <= DEBUG_MESSAGE_MAX_LEN {
-            return message;
-        }
-        // Find the last char whose end position is at or before max length
-        let mut last_valid = 0_usize;
-        for (idx, ch) in message.char_indices() {
-            let end_pos = idx + ch.len_utf8();
-            if end_pos > DEBUG_MESSAGE_MAX_LEN {
-                break;
-            }
-            last_valid = end_pos;
-        }
-        &message[..last_valid]
+        truncate_utf8(message, DEBUG_MESSAGE_MAX_LEN)
     }
 
     /// Read a message from stdin
     ///
-    /// Reads one line from stdin. Empty lines are skipped.
+    /// Loops until a non-empty line is read or EOF is reached. Empty/whitespace-only
+    /// lines are silently skipped.
     ///
     /// # Returns
     /// - `Ok(Some(message))` - Successfully read a non-empty message
-    /// - `Ok(None)` - Empty line or EOF
+    /// - `Ok(None)` - EOF (client disconnected)
     ///
     /// # Errors
     /// Returns an error if reading from stdin fails
     pub async fn read_message(&mut self) -> Result<Option<String>> {
-        let mut line = String::new();
-        let bytes_read = self
-            .stdin
-            .read_line(&mut line)
-            .await
-            .context("Failed to read from stdin")?;
+        loop {
+            let mut line = String::new();
+            let bytes_read = self
+                .stdin
+                .read_line(&mut line)
+                .await
+                .context("Failed to read from stdin")?;
 
-        if bytes_read == 0_usize {
-            debug!("EOF on stdin");
-            return Ok(None);
+            if bytes_read == 0_usize {
+                debug!("EOF on stdin");
+                return Ok(None);
+            }
+
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                // Ignore empty lines, keep reading
+                continue;
+            }
+
+            debug!("Read message: {}...", Self::truncate_for_debug(trimmed));
+            return Ok(Some(trimmed.to_owned()));
         }
-
-        let line = line.trim();
-        if line.is_empty() {
-            return Ok(None);
-        }
-
-        debug!("Read message: {}...", Self::truncate_for_debug(line));
-        Ok(Some(line.to_owned()))
     }
 
     /// Write a message to stdout

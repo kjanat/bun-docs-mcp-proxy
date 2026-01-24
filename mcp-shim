@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Development shim for bun-docs-mcp-proxy
+# Runs debug build instead of release for faster iteration during development
+#
+# Usage in Zed settings.json:
+#   "context_servers": {
+#     "bun-docs-mcp": {
+#       "settings": {
+#         "path": "/path/to/bun-docs-mcp-proxy/mcp-shim"
+#       }
+#     }
+#   }
+
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+export RUST_LOG="${RUST_LOG:-debug}"
+
+exec cargo run --quiet --manifest-path "${SCRIPT_DIR}/Cargo.toml" --bin bun-docs-mcp-proxy -- "$@"

@@ -1,6 +1,7 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/evilmartians/lefthook/refs/heads/master/schema.json
 # https://github.com/evilmartians/lefthook
 # Run: lefthook install
-
+---
 pre-commit:
   parallel: true
   commands:
@@ -22,7 +23,6 @@ pre-commit:
 
     tombi-lint:
       glob: "*.toml"
-      exclude: "Cargo.lock"
       run: tombi lint {staged_files}
 
     cargo-check:

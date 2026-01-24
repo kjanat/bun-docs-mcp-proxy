@@ -1,0 +1,81 @@
+# =============================================================================
+# Clippy Configuration
+# https://doc.rust-lang.org/clippy/lint_configuration.html
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Cargo lints
+# -----------------------------------------------------------------------------
+
+# Duplicate crates allowed (transitive deps we can't control)
+allowed-duplicate-crates                 = [
+  "getrandom",
+  "thiserror",
+  "thiserror-impl",
+  "windows-sys",
+  "windows-targets",
+  "windows_aarch64_gnullvm",
+  "windows_aarch64_msvc",
+  "windows_i686_gnu",
+  "windows_i686_gnullvm",
+  "windows_i686_msvc",
+  "windows_x86_64_gnu",
+  "windows_x86_64_gnullvm",
+  "windows_x86_64_msvc",
+]
+# -----------------------------------------------------------------------------
+# Complexity thresholds
+# -----------------------------------------------------------------------------
+cognitive-complexity-threshold           = 25
+too-many-lines-threshold                 = 100
+type-complexity-threshold                = 250
+too-many-arguments-threshold             = 6
+# -----------------------------------------------------------------------------
+# Boolean parameters
+# -----------------------------------------------------------------------------
+max-struct-bools                         = 3
+max-fn-params-bools                      = 3
+# -----------------------------------------------------------------------------
+# Size thresholds
+# -----------------------------------------------------------------------------
+too-large-for-stack                      = 512
+trivial-copy-size-limit                  = 16
+future-size-threshold                    = 16384
+enum-variant-size-threshold              = 200
+# -----------------------------------------------------------------------------
+# Identifier naming
+# -----------------------------------------------------------------------------
+# Allow common single-char names
+allowed-idents-below-min-chars           = ["i", "j", "k", "n", "x", "y", "z", "_"]
+# Limit single-char bindings per scope
+single-char-binding-names-threshold      = 5
+# -----------------------------------------------------------------------------
+# Formatting
+# -----------------------------------------------------------------------------
+# Require inlined format args: format!("{x}") not format!("{}", x)
+allow-mixed-uninlined-format-args        = false
+# Only lint multiline blocks for semicolon placement
+semicolon-inside-block-ignore-singleline = true
+# -----------------------------------------------------------------------------
+# Disallowed items (footguns)
+# -----------------------------------------------------------------------------
+disallowed-methods                       = [
+  { path = "std::env::set_var", reason = "Not thread-safe in multi-threaded context" },
+  { path = "std::env::remove_var", reason = "Not thread-safe in multi-threaded context" },
+]
+disallowed-types                         = [
+  { path = "std::collections::HashMap", reason = "Use indexmap for deterministic iteration order" },
+  { path = "std::collections::HashSet", reason = "Use indexmap for deterministic iteration order" },
+]
+# -----------------------------------------------------------------------------
+# Async safety
+# -----------------------------------------------------------------------------
+await-holding-invalid-types              = [
+  { path = "std::sync::MutexGuard", reason = "Holds lock across await - use async mutex" },
+  { path = "std::sync::RwLockReadGuard", reason = "Holds lock across await - use async RwLock" },
+  { path = "std::sync::RwLockWriteGuard", reason = "Holds lock across await - use async RwLock" },
+]
+# -----------------------------------------------------------------------------
+# API stability (disabled - small crate, no stability guarantees)
+# -----------------------------------------------------------------------------
+avoid-breaking-exported-api              = false

@@ -1,39 +1,28 @@
-//! Bun Docs MCP Proxy - Protocol adapter for Bun documentation search
+//! Bun Docs MCP Proxy.
 //!
-//! This proxy acts as a bridge between stdio-based MCP (Model Context Protocol) clients
-//! (like Zed editor) and the HTTP/SSE-based Bun documentation server at `https://bun.com/docs/mcp`.
+//! Two modes:
+//! - **MCP server mode** (default): reads JSON-RPC over stdin/stdout, proxies to bun.com/docs/mcp.
+//! - **CLI mode** (`--search ...`): performs a Bun docs query and prints/writes results.
 //!
-//! ## Request Flow
+//! ## Request Flow (MCP mode)
 //!
 //! ```text
-//! stdin (JSON-RPC) → Proxy → HTTP POST → bun.com/docs/mcp → SSE stream → parse → stdout (JSON-RPC)
+//! stdin (JSON-RPC) -> Proxy -> HTTP POST -> bun.com/docs/mcp -> SSE stream -> parse -> stdout (JSON-RPC)
 //! ```
 //!
-//! ## Supported JSON-RPC Methods
-//!
-//! - `initialize` - Initialize MCP connection, returns protocol version and capabilities
-//! - `tools/list` - List available tools (returns `SearchBun` tool)
-//! - `tools/call` - Execute a tool with parameters (forwarded to Bun Docs API)
-//! - `resources/list` - List available resources (returns Bun Documentation resource)
-//! - `resources/read` - Read a resource by URI (e.g., `bun://docs?query=Bun.serve`)
-//!
-//! ## Architecture
-//!
-//! The proxy consists of three main modules:
-//! - [`http`] - HTTP client with SSE parsing and retry logic
-//! - [`protocol`] - JSON-RPC 2.0 types and serialization
-//! - [`transport`] - Stdio transport layer for reading/writing messages
+//! Upstream transport: HTTP POST returning JSON or SSE; downstream transport: stdio JSON-RPC.
 
 mod http;
 mod protocol;
 mod transport;
+mod util;
 
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use core::fmt::Write as _;
 use protocol::{JsonRpcRequest, JsonRpcResponse};
 use std::fs;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 /// Standard JSON-RPC 2.0 error code for parse errors (invalid JSON).
@@ -122,30 +111,91 @@ fn get_string_param<'value>(
         .ok_or_else(|| format!("Missing or invalid {key} parameter"))
 }
 
+// Re-export truncate_for_log from util module
+use util::truncate_for_log;
+
+/// Attempts to extract the "id" field from a potentially malformed JSON string.
+///
+/// This is used to provide better error correlation when JSON-RPC parsing fails.
+/// Uses a simple regex-based approach to find the id field even in invalid JSON.
+///
+/// # Arguments
+/// * `json_str` - The raw JSON string (may be malformed).
+///
+/// # Returns
+/// The extracted id as a `serde_json::Value`, or `Value::Null` if extraction fails.
+fn extract_id_from_json(json_str: &str) -> serde_json::Value {
+    // Try parsing as valid JSON first (fastest path for valid JSON with wrong structure)
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str)
+        && let Some(id) = parsed.get("id")
+    {
+        return id.clone();
+    }
+
+    // Fallback: simple pattern matching for "id": followed by a value
+    // Handles: "id":123, "id":"str", "id":null
+    // This regex is intentionally simple - we just want to extract the id for correlation
+    if let Some(id_start) = json_str.find("\"id\"") {
+        let Some(after_id) = json_str.get(id_start + 4..) else {
+            return serde_json::Value::Null;
+        };
+        // Skip whitespace and colon
+        let trimmed = after_id.trim_start().strip_prefix(':').map(str::trim_start);
+        if let Some(value_start) = trimmed {
+            // Try to parse the value portion
+            if let Some(after_quote) = value_start.strip_prefix('"') {
+                // String id - find closing quote
+                if let Some(end) = after_quote.find('"') {
+                    let id_value = after_quote.get(..end).unwrap_or("").to_owned();
+                    return serde_json::Value::String(id_value);
+                }
+            } else if value_start.starts_with("null") {
+                return serde_json::Value::Null;
+            } else {
+                // Numeric id - extract digits
+                let num_str: String = value_start
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit() || *c == '-')
+                    .collect();
+                if let Ok(num) = num_str.parse::<i64>() {
+                    return serde_json::json!(num);
+                }
+            }
+        }
+    }
+
+    serde_json::Value::Null
+}
+
 /// Parses a Bun documentation URI (e.g., `bun://docs?query=example`) and extracts the search query.
 ///
-/// This function handles URIs for Bun documentation, specifically looking for the
-/// `bun://docs?query=` prefix to extract the query string. It also supports
-/// `bun://docs` for an empty query.
+/// Uses proper URL parsing with percent-decoding support.
+/// Accepts `bun://docs` scheme with optional `query` parameter.
 ///
 /// # Arguments
 /// * `uri` - The URI string to parse.
 ///
 /// # Returns
-/// A `Result` which on success contains the extracted search query as a `String`.
+/// A `Result` which on success contains the extracted (percent-decoded) search query as a `String`.
 /// On failure, it returns a `String` describing the invalid URI format.
-#[allow(
-    clippy::option_if_let_else,
-    reason = "clearer with explicit if-let-else pattern"
-)]
 fn parse_bun_docs_uri(uri: &str) -> Result<String, String> {
-    if let Some(query_part) = uri.strip_prefix("bun://docs?query=") {
-        Ok(query_part.to_owned())
-    } else if uri == "bun://docs" {
-        Ok(String::new())
-    } else {
-        Err(format!("Invalid URI format: {uri}"))
+    let parsed =
+        reqwest::Url::parse(uri).map_err(|e| format!("Invalid URI format: {uri} ({e})"))?;
+
+    if parsed.scheme() != "bun" || parsed.host_str() != Some("docs") {
+        return Err(format!(
+            "Invalid URI format: expected bun://docs, got {uri}"
+        ));
     }
+
+    // Extract query parameter (percent-decoded automatically)
+    let query = parsed
+        .query_pairs()
+        .find(|(k, _)| k == "query")
+        .map(|(_, v)| v.into_owned())
+        .unwrap_or_default();
+
+    Ok(query)
 }
 
 /// Initializes the `tracing` subscriber for logging.
@@ -377,7 +427,7 @@ async fn direct_search(
     // Build search request
     let request = serde_json::json!({
         "jsonrpc": "2.0",
-        "id": 1,
+        "id": 1_i32,
         "method": "tools/call",
         "params": {
             "name": "SearchBun",
@@ -455,37 +505,62 @@ async fn main() -> Result<()> {
             }
         };
 
+        // Log raw message for debugging parse errors
+        debug!(
+            "Raw message ({} bytes): {}",
+            message.len(),
+            truncate_for_log(&message, 500)
+        );
+
         // Parse JSON-RPC request
         let request: JsonRpcRequest = match serde_json::from_str(&message) {
             Ok(req) => req,
             Err(e) => {
-                error!("Failed to parse JSON-RPC request: {}", e);
+                error!(
+                    "Failed to parse JSON-RPC request: {} | raw: {}",
+                    e,
+                    truncate_for_log(&message, 200)
+                );
+
+                // Try to extract id from malformed JSON for better error correlation
+                let extracted_id = extract_id_from_json(&message);
+
                 let error_response = JsonRpcResponse::error(
-                    serde_json::Value::Null,
+                    extracted_id,
                     JSONRPC_PARSE_ERROR,
                     format!("Parse error: {e}"),
                 );
-                if let Ok(response_str) = serde_json::to_string(&error_response) {
-                    let write_result = transport.write_message(&response_str).await;
-                    let _ = write_result;
+                if let Ok(response_str) = serde_json::to_string(&error_response)
+                    && let Err(write_err) = transport.write_message(&response_str).await
+                {
+                    error!("Failed to write parse error response: {}", write_err);
+                    break;
                 }
                 continue;
             }
+        };
+
+        // JSON-RPC 2.0: notifications have no id field - don't send a response
+        let Some(request_id) = request.id.clone() else {
+            debug!("Received notification (no id): {}", request.method);
+            continue;
         };
 
         info!("Received method: {}", request.method);
 
         // Handle request based on method
         let response = match request.method.as_str() {
-            "tools/call" => handle_tools_call(&http_client, &request).await,
-            "tools/list" => handle_tools_list(&request),
-            "resources/list" => handle_resources_list(&request),
-            "resources/read" => handle_resources_read(&http_client, &request).await,
-            "initialize" => handle_initialize(&request),
+            "tools/call" => handle_tools_call(&http_client, &request, request_id.clone()).await,
+            "tools/list" => handle_tools_list(request_id.clone()),
+            "resources/list" => handle_resources_list(request_id.clone()),
+            "resources/read" => {
+                handle_resources_read(&http_client, &request, request_id.clone()).await
+            }
+            "initialize" => handle_initialize(request_id.clone()),
             method => {
                 error!("Unsupported method: {}", method);
                 JsonRpcResponse::error(
-                    request.id,
+                    request_id,
                     JSONRPC_METHOD_NOT_FOUND,
                     format!("Method not found: {method}"),
                 )
@@ -504,6 +579,8 @@ async fn main() -> Result<()> {
             }
             Err(e) => {
                 error!("Failed to serialize response: {}", e);
+                // Serialization failures are likely unrecoverable (e.g., internal data corruption)
+                break;
             }
         }
     }
@@ -521,17 +598,19 @@ async fn main() -> Result<()> {
 /// # Arguments
 /// * `client` - A reference to the `BunDocsClient` for making the API call.
 /// * `request` - A reference to the incoming `JsonRpcRequest`.
+/// * `request_id` - The request identifier for the response.
 ///
 /// # Returns
 /// A `JsonRpcResponse` to be sent back to the client.
 async fn handle_tools_call(
     client: &http::BunDocsClient,
     request: &JsonRpcRequest,
+    request_id: serde_json::Value,
 ) -> JsonRpcResponse {
     // Forward entire request to Bun Docs API
     let original_request = serde_json::json!({
         "jsonrpc": "2.0",
-        "id": request.id,
+        "id": request_id,
         "method": request.method,
         "params": request.params
     });
@@ -547,15 +626,15 @@ async fn handle_tools_call(
                 reason = "clearer with explicit pattern match"
             )]
             if let Some(result_field) = result.get("result") {
-                JsonRpcResponse::success(request.id.clone(), result_field.clone())
+                JsonRpcResponse::success(request_id, result_field.clone())
             } else {
-                JsonRpcResponse::success(request.id.clone(), result)
+                JsonRpcResponse::success(request_id, result)
             }
         }
         Err(e) => {
             error!("Failed to forward request: {}", e);
             JsonRpcResponse::error(
-                request.id.clone(),
+                request_id,
                 JSONRPC_INTERNAL_ERROR,
                 format!("Internal error: {e}"),
             )
@@ -568,11 +647,11 @@ async fn handle_tools_call(
 /// Currently, this returns a single tool: `SearchBun`.
 ///
 /// # Arguments
-/// * `request` - A reference to the incoming `JsonRpcRequest`.
+/// * `request_id` - The request identifier for the response.
 ///
 /// # Returns
 /// A `JsonRpcResponse` containing the list of tools.
-fn handle_tools_list(request: &JsonRpcRequest) -> JsonRpcResponse {
+fn handle_tools_list(request_id: serde_json::Value) -> JsonRpcResponse {
     // Return available tools
     let tools = serde_json::json!({
         "tools": [{
@@ -591,7 +670,7 @@ fn handle_tools_list(request: &JsonRpcRequest) -> JsonRpcResponse {
         }]
     });
 
-    JsonRpcResponse::success(request.id.clone(), tools)
+    JsonRpcResponse::success(request_id, tools)
 }
 
 /// Handles a `resources/list` JSON-RPC request by returning a static list of available resources.
@@ -599,11 +678,11 @@ fn handle_tools_list(request: &JsonRpcRequest) -> JsonRpcResponse {
 /// Currently, this returns a single resource: `bun://docs`.
 ///
 /// # Arguments
-/// * `request` - A reference to the incoming `JsonRpcRequest`.
+/// * `request_id` - The request identifier for the response.
 ///
 /// # Returns
 /// A `JsonRpcResponse` containing the list of resources.
-fn handle_resources_list(request: &JsonRpcRequest) -> JsonRpcResponse {
+fn handle_resources_list(request_id: serde_json::Value) -> JsonRpcResponse {
     // Return available resources
     let resources = serde_json::json!({
         "resources": [{
@@ -614,7 +693,7 @@ fn handle_resources_list(request: &JsonRpcRequest) -> JsonRpcResponse {
         }]
     });
 
-    JsonRpcResponse::success(request.id.clone(), resources)
+    JsonRpcResponse::success(request_id, resources)
 }
 
 /// Handles a `resources/read` JSON-RPC request.
@@ -626,17 +705,19 @@ fn handle_resources_list(request: &JsonRpcRequest) -> JsonRpcResponse {
 /// # Arguments
 /// * `client` - A reference to the `BunDocsClient` for making the API call.
 /// * `request` - A reference to the incoming `JsonRpcRequest`.
+/// * `request_id` - The request identifier for the response.
 ///
 /// # Returns
 /// A `JsonRpcResponse` containing the resource content or an error.
 async fn handle_resources_read(
     client: &http::BunDocsClient,
     request: &JsonRpcRequest,
+    request_id: serde_json::Value,
 ) -> JsonRpcResponse {
     // Extract and validate params
     let Some(params) = &request.params else {
         return JsonRpcResponse::error(
-            request.id.clone(),
+            request_id,
             JSONRPC_INVALID_PARAMS,
             "Missing params".to_owned(),
         );
@@ -646,7 +727,7 @@ async fn handle_resources_read(
     let uri = match get_string_param(params, "uri") {
         Ok(u) => u,
         Err(msg) => {
-            return JsonRpcResponse::error(request.id.clone(), JSONRPC_INVALID_PARAMS, msg);
+            return JsonRpcResponse::error(request_id, JSONRPC_INVALID_PARAMS, msg);
         }
     };
 
@@ -654,14 +735,14 @@ async fn handle_resources_read(
     let query = match parse_bun_docs_uri(uri) {
         Ok(q) => q,
         Err(msg) => {
-            return JsonRpcResponse::error(request.id.clone(), JSONRPC_INVALID_PARAMS, msg);
+            return JsonRpcResponse::error(request_id, JSONRPC_INVALID_PARAMS, msg);
         }
     };
 
     // Forward to tools/call internally
     let search_request = serde_json::json!({
         "jsonrpc": "2.0",
-        "id": request.id,
+        "id": request_id,
         "method": "tools/call",
         "params": {
             "name": "SearchBun",
@@ -683,7 +764,7 @@ async fn handle_resources_read(
                 Err(e) => {
                     error!("Failed to serialize resource content: {}", e);
                     return JsonRpcResponse::error(
-                        request.id.clone(),
+                        request_id,
                         JSONRPC_INTERNAL_ERROR,
                         format!("Failed to serialize resource: {e}"),
                     );
@@ -699,12 +780,12 @@ async fn handle_resources_read(
                 }]
             });
 
-            JsonRpcResponse::success(request.id.clone(), resource_response)
+            JsonRpcResponse::success(request_id, resource_response)
         }
         Err(e) => {
             error!("Failed to read resource: {}", e);
             JsonRpcResponse::error(
-                request.id.clone(),
+                request_id,
                 JSONRPC_INTERNAL_ERROR,
                 format!("Internal error: {e}"),
             )
@@ -716,11 +797,11 @@ async fn handle_resources_read(
 /// capabilities, and server information.
 ///
 /// # Arguments
-/// * `request` - A reference to the incoming `JsonRpcRequest`.
+/// * `request_id` - The request identifier for the response.
 ///
 /// # Returns
 /// A `JsonRpcResponse` containing the initialization result.
-fn handle_initialize(request: &JsonRpcRequest) -> JsonRpcResponse {
+fn handle_initialize(request_id: serde_json::Value) -> JsonRpcResponse {
     // Handle MCP initialize request
     let init_result = serde_json::json!({
         "protocolVersion": "2024-11-05",
@@ -734,7 +815,7 @@ fn handle_initialize(request: &JsonRpcRequest) -> JsonRpcResponse {
         }
     });
 
-    JsonRpcResponse::success(request.id.clone(), init_result)
+    JsonRpcResponse::success(request_id, init_result)
 }
 
 #[cfg(test)]

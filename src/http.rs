@@ -1,45 +1,21 @@
-//! HTTP client for the Bun Docs API with SSE support and automatic retries.
+//! HTTP client for bun.com/docs/mcp.
 //!
-//! This module provides a robust HTTP client that:
-//! - Forwards JSON-RPC requests to the Bun Docs API at `https://bun.com/docs/mcp`
-//! - Parses Server-Sent Events (SSE) responses from the API
-//! - Implements automatic retry logic with exponential backoff for transient failures
-//! - Provides testability via `with_base_url()` constructor for mock servers
+//! ## Response Contract
 //!
-//! ## Example
+//! Responses may be either:
+//! - `application/json` (single JSON-RPC object), or
+//! - `text/event-stream` (SSE), where each event's `data` contains a complete JSON-RPC object.
 //!
-//! ```no_run
-//! use bun_docs_mcp_proxy::http::BunDocsClient;
-//! use serde_json::json;
+//! **Important**: We do **not** accumulate partial/delta SSE events. If the upstream starts
+//! streaming deltas, this parser must be upgraded.
 //!
-//! # async fn example() -> anyhow::Result<()> {
-//! let client = BunDocsClient::new();
-//! let request = json!({
-//!     "jsonrpc": "2.0",
-//!     "id": 1,
-//!     "method": "tools/list"
-//! });
-//! let response = client.forward_request(request).await?;
-//! # Ok(())
-//! # }
-//! ```
+//! ## Retry Contract
 //!
-//! ## SSE Protocol Behavior
-//!
-//! The Bun Docs API may return responses as SSE (Server-Sent Events) or plain JSON,
-//! depending on the content-type header. When parsing SSE streams:
-//! - Only "message" and "completion" event types are processed
-//! - Heartbeat and other event types are ignored
-//! - **Important**: This implementation expects a complete JSON-RPC object in a single
-//!   SSE event. If the server streams partial deltas across multiple events, this
-//!   implementation will not accumulate them. Adjust `parse_sse_response()` if the
-//!   protocol changes to delta streaming.
-//!
-//! ## Retry Strategy
-//!
-//! Transient failures (network errors, 429, 5xx status codes) are retried up to
-//! [`MAX_RETRIES`] times with exponential backoff (200 ms → 400 ms → 800 ms, capped at 1 s).
+//! Transient failures (network errors, 429, 5xx) are retried up to [`MAX_RETRIES`] times:
+//! - For 429: uses `Retry-After` header if present, else exponential backoff.
+//! - For 5xx/network: exponential backoff (200 ms -> 400 ms -> 800 ms, capped at 1 s).
 
+use crate::util::truncate_utf8;
 use anyhow::{Context as _, Result};
 use bytes::Bytes;
 use eventsource_stream::Eventsource as _;
@@ -87,11 +63,11 @@ impl Default for BunDocsClient {
 impl BunDocsClient {
     /// Creates a new client with the default Bun Docs API URL.
     ///
-    /// # Panics
-    /// Panics if the hardcoded URL is invalid (should never happen in practice).
+    /// Uses a compile-time validated URL constant, so this cannot fail at runtime.
     #[must_use]
     pub fn new() -> Self {
-        Self::with_base_url(BUN_DOCS_API).expect("valid base URL")
+        #[allow(clippy::expect_used, reason = "URL constant is compile-time valid")]
+        Self::with_base_url(BUN_DOCS_API).expect("BUN_DOCS_API is a valid URL")
     }
 
     /// Creates a new client with a custom base URL.
@@ -151,6 +127,26 @@ impl BunDocsClient {
         )
     }
 
+    /// Extracts delay from `Retry-After` header if present.
+    ///
+    /// Supports integer seconds format (e.g., "Retry-After: 120").
+    /// Does NOT support HTTP-date format.
+    ///
+    /// # Arguments
+    /// * `headers` - A reference to the `HeaderMap` containing the HTTP response headers.
+    ///
+    /// # Returns
+    /// `Some(Duration)` if a valid integer delay was found, `None` otherwise.
+    fn retry_after_delay(headers: &HeaderMap) -> Option<Duration> {
+        headers
+            .get(reqwest::header::RETRY_AFTER)?
+            .to_str()
+            .ok()?
+            .parse::<u64>()
+            .ok()
+            .map(Duration::from_secs)
+    }
+
     /// Extracts the main content type from a `HeaderMap`, stripping parameters like charset.
     ///
     /// For example, `application/json; charset=utf-8` would return `application/json`.
@@ -197,34 +193,6 @@ impl BunDocsClient {
             })
             .collect::<Vec<_>>()
             .join(", ")
-    }
-
-    /// Truncates a string to a maximum byte length, ensuring that the truncation
-    /// occurs on a UTF-8 character boundary to prevent invalid UTF-8 sequences.
-    ///
-    /// If the string's byte length is already less than or equal to `max_len`,
-    /// the original string slice is returned.
-    ///
-    /// # Arguments
-    /// * `text` - The string slice to truncate.
-    /// * `max_len` - The maximum desired length in bytes.
-    ///
-    /// # Returns
-    /// A string slice (`&str`) that is a valid UTF-8 truncation of the input `text`.
-    fn truncate_utf8(text: &str, max_len: usize) -> &str {
-        if text.len() <= max_len {
-            return text;
-        }
-        // Find the last char whose end position is at or before max_len
-        let mut last_valid = 0_usize;
-        for (idx, ch) in text.char_indices() {
-            let end_pos = idx + ch.len_utf8();
-            if end_pos > max_len {
-                break;
-            }
-            last_valid = end_pos;
-        }
-        &text[..last_valid]
     }
 
     /// Forward a JSON-RPC request to the Bun Docs API with automatic retries
@@ -287,36 +255,33 @@ impl BunDocsClient {
                         warn!("Failed to read error response body: {}", error);
                         Bytes::default()
                     });
-                    let limited_bytes: &[u8] = if bytes.len() > MAX_ERROR_BODY_SIZE {
-                        &bytes[..MAX_ERROR_BODY_SIZE]
-                    } else {
-                        &bytes
-                    };
+                    let limited_bytes: &[u8] = bytes.get(..MAX_ERROR_BODY_SIZE).unwrap_or(&bytes);
                     let body = String::from_utf8_lossy(limited_bytes);
-                    let body_snippet = Self::truncate_utf8(&body, MAX_ERROR_SNIPPET_SIZE);
+                    let body_snippet = truncate_utf8(&body, MAX_ERROR_SNIPPET_SIZE);
                     let header_summary = Self::summarize_headers(&headers);
 
+                    let ct_display = if content_type.is_empty() {
+                        "(none)"
+                    } else {
+                        &content_type
+                    };
                     let error = anyhow::anyhow!(
-                        "Bun Docs API error: status={} content_type={} headers=[{}] body_snippet=\"{}\"",
-                        status,
-                        if content_type.is_empty() {
-                            "<none>"
-                        } else {
-                            &content_type
-                        },
-                        header_summary,
-                        body_snippet
+                        "Bun Docs API error: status={status} content_type={ct_display} headers=[{header_summary}] body_snippet=\"{body_snippet}\""
                     );
 
                     // Retry on transient server statuses
                     if Self::is_transient_status(status) && attempt < MAX_RETRIES {
+                        // Use Retry-After header if present (for 429), else exponential backoff
+                        let delay = Self::retry_after_delay(&headers).unwrap_or_else(|| {
+                            Duration::from_millis(Self::backoff_delay_ms(attempt))
+                        });
                         warn!(
-                            "Transient HTTP status {}, retrying (attempt {})",
+                            "Transient HTTP status {}, retrying in {:?} (attempt {})",
                             status,
+                            delay,
                             attempt + 1
                         );
-                        let delay = Self::backoff_delay_ms(attempt);
-                        tokio::time::sleep(Duration::from_millis(delay)).await;
+                        tokio::time::sleep(delay).await;
                         last_error = Some(error);
                         continue;
                     }
@@ -375,8 +340,7 @@ impl BunDocsClient {
         let mut json_response: Option<Value> = None;
 
         loop {
-            let event_result = event_stream.next().await;
-            let Some(event_result) = event_result else {
+            let Some(event_result) = event_stream.next().await else {
                 break;
             };
             match event_result {
@@ -411,7 +375,8 @@ impl BunDocsClient {
                             }
                             Err(error) => {
                                 warn!("Failed to parse SSE data as JSON: {}", error);
-                                debug!("SSE data: {}", &data[..data.len().min(200_usize)]);
+                                let preview = data.get(..200).unwrap_or(&data);
+                                debug!("SSE data: {preview}");
                             }
                         }
                     }
@@ -580,12 +545,13 @@ mod tests {
     }
 
     #[test]
-    fn truncate_utf8() {
+    fn truncate_utf8_via_util() {
+        // truncate_utf8 moved to util module, test import works
         let short = "hello";
-        assert_eq!(BunDocsClient::truncate_utf8(short, 10_usize), short);
+        assert_eq!(truncate_utf8(short, 10_usize), short);
 
         let long = "a".repeat(100_usize);
-        let truncated = BunDocsClient::truncate_utf8(&long, 50_usize);
+        let truncated = truncate_utf8(&long, 50_usize);
         assert!(truncated.len() <= 50_usize);
         assert!(!truncated.is_empty());
         assert!(truncated.is_char_boundary(truncated.len()));
@@ -593,7 +559,7 @@ mod tests {
         // Test with Unicode characters
         // "hello 世界"
         let unicode = "hello \u{4e16}\u{754c}";
-        let truncated_unicode = BunDocsClient::truncate_utf8(unicode, 8_usize);
+        let truncated_unicode = truncate_utf8(unicode, 8_usize);
         assert!(truncated_unicode.len() <= 8_usize);
         assert!(truncated_unicode.is_char_boundary(truncated_unicode.len()));
     }

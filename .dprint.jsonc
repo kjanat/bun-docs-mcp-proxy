@@ -14,6 +14,13 @@
         "command": "tombi format --stdin-filename {{file_path}} -",
         "exts": ["toml"],
       },
+      {
+        "command": "rustfmt",
+        "exts": ["rs"],
+        "cacheKeyFiles": [
+          "rustfmt.toml", // "rust-toolchain.toml"
+        ],
+      },
     ],
   },
   "includes": [".github/**", "**"],

@@ -53,7 +53,7 @@ build *args:
 build-release:
     cargo build --release
     @echo "Built {{ binary_name }} version {{ current_version }} (commit {{ commit_hash }}) at {{ build_time }}"
-    @echo "Binary: ./{{ build_dir }}/{{ binary_name }}"
+    @echo "Binary: {{ build_dir }}/{{ binary_name }}"
 
 # Remove build artifacts
 [group('build')]
@@ -254,9 +254,10 @@ build-linux-musl:
 build-linux-arm64-musl:
     cargo zigbuild --release --target aarch64-unknown-linux-musl
 
-# Build for Linux x86_64 (native, requires Linux host)
+# Build for all native platforms (current OS only)
 [group('cross-build')]
-build-linux-native: build-linux-gnu
+[confirm("Build for ALL platforms? This will take several minutes.")]
+build-all-native: build-linux-gnu
 
 # Build for all cross-compilation targets (requires Zig)
 [group('cross-build')]
@@ -305,15 +306,10 @@ package-windows: build-windows
 package-windows-arm: build-windows-arm
     cd target/aarch64-pc-windows-msvc/release && 7z a {{ binary_name }}-windows-aarch64.zip {{ binary_name }}.exe
 
-# Generate SHA256SUMS for all packaged binaries (portable: Linux + macOS)
+# Generate SHA256SUMS for all packaged binaries
 [group('package')]
 checksums:
-    #!/usr/bin/env sh
-    if command -v sha256sum >/dev/null 2>&1; then
-        find target -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec sha256sum {} \;
-    else
-        find target -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec shasum -a 256 {} \;
-    fi | sed 's|target/[^/]*/release/||' > SHA256SUMS
+    find target -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec sha256sum {} \; | sed 's|target/[^/]*/release/||' > SHA256SUMS
     cat SHA256SUMS
 
 # ===== Development Tools =====

@@ -1,3 +1,5 @@
+//! Integration tests for bun-docs-mcp-proxy JSON-RPC protocol compliance.
+
 #![allow(clippy::expect_used, reason = "tests can use expect() for clarity")]
 #![allow(clippy::unwrap_used, reason = "tests can use unwrap() for brevity")]
 #![allow(clippy::indexing_slicing, reason = "tests use array indexing safely")]

@@ -1,3 +1,11 @@
+//! HTTP edge case tests for network errors and SSE parsing.
+//!
+//! Network tests that hit real hosts (httpbingo.org, DNS failure tests, etc.)
+//! are gated behind the `integration-tests` feature to prevent CI flakiness.
+//!
+//! Run with: `cargo test --features integration-tests`
+
+#![cfg(feature = "integration-tests")]
 #![allow(clippy::expect_used, reason = "tests can use expect() for clarity")]
 #![allow(clippy::unwrap_used, reason = "tests can use unwrap() for brevity")]
 #![allow(clippy::indexing_slicing, reason = "tests use array indexing safely")]
@@ -9,6 +17,11 @@
 #![allow(
     clippy::tests_outside_test_module,
     reason = "integration tests in tests/ directory"
+)]
+#![allow(clippy::shadow_reuse, reason = "intentional shadowing in SSE loop")]
+#![allow(
+    clippy::single_call_fn,
+    reason = "helper functions improve readability"
 )]
 
 // Additional HTTP module tests for network errors and edge cases

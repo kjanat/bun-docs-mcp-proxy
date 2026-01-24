@@ -1,6 +1,6 @@
 [package]
 name        = "bun-docs-mcp-proxy"
-version     = "0.3.0"
+version     = "0.3.0+dev"
 edition     = "2024"
 description = "MCP proxy for Bun documentation search"
 repository  = "https://github.com/kjanat/bun-docs-mcp-proxy"
@@ -9,15 +9,15 @@ keywords    = ["bun", "documentation", "mcp", "protocol", "proxy"]
 categories  = ["command-line-utilities", "web-programming"]
 
 [dependencies]
-anyhow             = "1.0"
+anyhow             = "1"
 bytes              = "1"
 clap               = { version = "4.5", features = ["derive"] }
 eventsource-stream = "0.2"
 futures            = "0.3"
-reqwest            = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
-serde              = { version = "1.0", features = ["derive"] }
+reqwest            = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
+serde              = { version = "1", features = ["derive"] }
 serde_json         = "1.0"
-tokio              = { version = "1", default-features = false, features = ["io-std", "io-util", "macros", "rt-multi-thread"] }
+tokio              = { version = "1", default-features = false, features = ["io-std", "io-util", "macros", "rt-multi-thread", "time"] }
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
@@ -34,39 +34,97 @@ default           = []
 integration-tests = []
 
 [lints.clippy]
-# Individual restriction lints (blanket restriction group is forbidden by clippy)
-# Note: Using "allow" for overly pedantic lints that fight idiomatic Rust
-absolute_paths                  = "allow"                            # Too noisy, blocks std::path::Path etc
-allow_attributes_without_reason = "warn"
-arithmetic_side_effects         = "allow"                            # Too pedantic for idx + 1
-as_conversions                  = "allow"                            # Sometimes necessary
-cargo                           = { level = "warn", priority = -1 }
-decimal_literal_representation  = "allow"
-default_numeric_fallback        = "allow"                            # json!(1) is fine
-expect_used                     = "allow"                            # Better than unwrap with message
-implicit_return                 = "allow"                            # Idiomatic Rust uses implicit returns
-indexing_slicing                = "allow"                            # Common pattern, tests especially
-let_underscore_must_use         = "allow"
-let_underscore_untyped          = "allow"
-min_ident_chars                 = "allow"                            # |e| is fine in closures
-missing_docs_in_private_items   = "allow"                            # Too verbose for private items
-mod_module_files                = "warn"                             # Keep this - prefer single-file modules
-# Allow multiple versions for dev-dependencies (mockito/tempfile use newer getrandom than ring)
-multiple_crate_versions         = "allow"
-nursery                         = { level = "warn", priority = -1 }
-pattern_type_mismatch           = "allow"
-pedantic                        = { level = "warn", priority = -1 }
-print_stderr                    = "allow"                            # CLI tool needs output
-print_stdout                    = "allow"                            # CLI tool needs output
-question_mark_used              = "allow"                            # Idiomatic error handling
-shadow_reuse                    = "allow"                            # let line = line.trim() is fine
-shadow_unrelated                = "warn"                             # But warn on unrelated shadowing
-single_call_fn                  = "allow"                            # Helper functions improve readability
-single_char_lifetime_names      = "warn"
-string_slice                    = "allow"                            # Common pattern when UTF-8 safe
-tests_outside_test_module       = "allow"                            # Tests in tests/ are fine
-unseparated_literal_suffix      = "warn"
-unwrap_used                     = "allow"                            # Tests can unwrap
+# Restriction lints (cherry-picked, not whole group)
+alloc_instead_of_core             = "warn"
+allow_attributes_without_reason   = "warn"
+assertions_on_result_states       = "warn"
+# Lint groups (priority -1 allows individual overrides)
+cargo                             = { level = "warn", priority = -1 }
+clone_on_ref_ptr                  = "warn"
+dbg_macro                         = "warn"
+decimal_literal_representation    = "warn"
+default_numeric_fallback          = "warn"
+disallowed_methods                = "warn"
+disallowed_types                  = "warn"
+empty_drop                        = "warn"
+empty_enum_variants_with_brackets = "warn"
+empty_structs_with_brackets       = "warn"
+error_impl_error                  = "warn"
+exit                              = "warn"
+expect_used                       = "warn"
+filetype_is_file                  = "warn"
+float_cmp_const                   = "warn"
+fn_to_numeric_cast_any            = "warn"
+format_push_string                = "warn"
+get_unwrap                        = "warn"
+if_then_some_else_none            = "warn"
+impl_trait_in_params              = "warn"
+indexing_slicing                  = "warn"
+infinite_loop                     = "warn"
+integer_division                  = "warn"
+integer_division_remainder_used   = "warn"
+iter_over_hash_type               = "warn"
+let_underscore_must_use           = "warn"
+let_underscore_untyped            = "warn"
+lossy_float_literal               = "warn"
+map_err_ignore                    = "warn"
+mem_forget                        = "warn"
+missing_assert_message            = "warn"
+missing_asserts_for_indexing      = "warn"
+# Pedantic overrides (too noisy/not useful for this crate)
+mixed_read_write_in_expression    = "warn"
+multiple_inherent_impl            = "warn"
+mutex_atomic                      = "warn"
+needless_raw_strings              = "warn"
+nursery                           = { level = "warn", priority = -1 }
+panic                             = "warn"
+panic_in_result_fn                = "warn"
+partial_pub_fields                = "warn"
+pathbuf_init_then_push            = "warn"
+pedantic                          = { level = "warn", priority = -1 }
+pub_without_shorthand             = "warn"
+rc_buffer                         = "warn"
+rc_mutex                          = "warn"
+redundant_type_annotations        = "warn"
+ref_patterns                      = "warn"
+renamed_function_params           = "warn"
+rest_pat_in_fully_bound_structs   = "warn"
+same_name_method                  = "warn"
+self_named_module_files           = "warn"
+semicolon_inside_block            = "warn"
+shadow_reuse                      = "warn"
+shadow_same                       = "warn"
+single_call_fn                    = "warn"
+std_instead_of_alloc              = "warn"
+str_to_string                     = "warn"
+string_add                        = "warn"
+string_lit_chars_any              = "warn"
+string_slice                      = "warn"
+suspicious_xor_used_as_pow        = "warn"
+tests_outside_test_module         = "warn"
+todo                              = "warn"
+try_err                           = "warn"
+undocumented_unsafe_blocks        = "warn"
+unimplemented                     = "warn"
+unnecessary_safety_comment        = "warn"
+unnecessary_safety_doc            = "warn"
+unnecessary_self_imports          = "warn"
+unneeded_field_pattern            = "warn"
+unreachable                       = "warn"
+unseparated_literal_suffix        = "warn"
+unused_result_ok                  = "warn"
+unwrap_in_result                  = "warn"
+unwrap_used                       = "warn"
+use_debug                         = "warn"
+verbose_file_reads                = "warn"
+wildcard_enum_match_arm           = "warn"
+
+[lints.rust]
+let_underscore          = { level = "warn", priority = -1 }
+missing_docs            = "warn"
+rust_2024_compatibility = { level = "warn", priority = -1 }
+# Core Rust lints
+unsafe_code             = "deny"
 
 [profile.release]
 opt-level     = "z"      # Optimize for size

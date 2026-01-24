@@ -4,11 +4,14 @@
 [![Release](https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/release.yml/badge.svg)][release.yml]
 [![codecov](https://codecov.io/gh/kjanat/bun-docs-mcp-proxy/graph/badge.svg?token=ySY6HF2Vbx)][codecov]
 
-Fast, lightweight MCP proxy for Bun documentation search. Search Bun docs from your editor (Zed, Claude Code) or command line.
+Fast, lightweight MCP proxy for Bun documentation search. Search Bun docs from
+your editor (Zed, Claude Code) or command line.
 
 ## What is it?
 
-A native Rust proxy that bridges MCP clients (like Zed or Claude Code) with Bun's documentation server. Get instant access to Bun documentation through MCP tools and resources, or use the built-in CLI for quick searches.
+A native Rust proxy that bridges MCP clients (like Zed or Claude Code) with
+Bun's documentation server. Get instant access to Bun documentation through MCP
+tools and resources, or use the built-in CLI for quick searches.
 
 Works as both an MCP server (stdio mode) and standalone CLI tool (search mode).
 
@@ -70,8 +73,8 @@ bun-docs-mcp-proxy -s "test" -f text
 
 Use with Zed, Claude Code, or any MCP client:
 
-**Zed Extension:**
-Install [bun-docs-mcp-zed][zed-extension] extension (auto-downloads proxy)
+**Zed Extension:** Install [bun-docs-mcp-zed][zed-extension] extension
+(auto-downloads proxy)
 
 **Manual MCP Configuration:**
 
@@ -96,7 +99,8 @@ Install [bun-docs-mcp-zed][zed-extension] extension (auto-downloads proxy)
 ## Documentation
 
 - **[INDEX.md](INDEX.md)** — Complete project navigation and reference
-- **[CONTRIBUTING.md](.github/CONTRIBUTING.md)** — Development setup and workflow
+- **[CONTRIBUTING.md](.github/CONTRIBUTING.md)** — Development setup and
+  workflow
 - **[TESTING.md](.github/TESTING.md)** — Testing strategy and commands
 - **[CHANGELOG.md](CHANGELOG.md)** — Version history and releases
 - **[SECURITY.md](.github/SECURITY.md)** — Security policy
@@ -119,7 +123,8 @@ task br         # Release build
 task build-all  # All platforms
 ```
 
-See [INDEX.md](INDEX.md) for comprehensive command reference, architecture details, and cross-platform builds.
+See [INDEX.md](INDEX.md) for comprehensive command reference, architecture
+details, and cross-platform builds.
 
 ## Performance
 
