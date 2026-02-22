@@ -92,6 +92,7 @@ jobs:
       - run: rustup toolchain install nightly --component rustfmt
       - uses: oven-sh/setup-bun@v2
       - run: bun i -g dprint tombi --trust
+      - uses: taiki-e/install-action@cargo-deny
 
       - name: Run lint checks
         run: just ci-lint
