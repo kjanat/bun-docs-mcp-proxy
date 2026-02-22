@@ -32,7 +32,8 @@ runs:
   steps:
     - uses: oven-sh/setup-bun@v2
     - shell: bash
-      run: bun i
+      id: install_deps
+      run: bun --cwd="${{ github.action_path }}" i
     - shell: bash
       id: create_release
-      run: ${{ github.action_path }}/src/index.ts
+      run: bun --cwd="${{ github.action_path }}" --bun src/index.ts
