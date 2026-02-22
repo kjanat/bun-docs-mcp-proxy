@@ -86,6 +86,9 @@ jobs:
             exit 1
           fi
 
+      - uses: oven-sh/setup-bun@v2
+      - run: bun i -g dprint tombi
+
       - name: Run lint checks
         run: just ci-lint
 
