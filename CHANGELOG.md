@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-02-22
+
 ### Added
 
 - `deny.toml` for cargo-deny license/security policy
@@ -52,6 +54,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 - Expanded `bacon.toml` with project-specific jobs and keybindings
 - Updated `SECURITY.md` supported versions (1.x supported, <1.0.0 unsupported)
 - Updated `CONTRIBUTING.md` Rust version requirement (1.85.0+, edition 2024)
+- Bump 68 dependencies (`cargo update`)
 
 ### Removed
 
@@ -251,9 +254,8 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 <!--tag-link-definitions-start-->
 
-<!--[rust-legacy]: https://github.com/kjanat/bun-docs-mcp-proxy/compare/X...rust-legacy-->
-
-[Unreleased]: https://github.com/kjanat/bun-docs-mcp-proxy/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/kjanat/bun-docs-mcp-proxy/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/kjanat/bun-docs-mcp-proxy/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/kjanat/bun-docs-mcp-proxy/compare/v0.3.0...v1.0.0
 [0.3.0]: https://github.com/kjanat/bun-docs-mcp-proxy/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/kjanat/bun-docs-mcp-proxy/compare/v0.2.0...v0.2.1
