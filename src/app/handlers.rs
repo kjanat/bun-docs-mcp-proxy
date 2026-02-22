@@ -126,6 +126,51 @@ fn parse_bun_docs_uri(uri: &str) -> Result<String, String> {
 }
 
 // ============================================================================
+// Upstream Response Conversion
+// ============================================================================
+
+/// Converts an upstream forward result into a JSON-RPC response.
+///
+/// Handles success, upstream JSON-RPC errors, and transport/network errors uniformly.
+/// This helper deduplicates the `match UpstreamResponse { Ok/Err }` → `JsonRpcResponse`
+/// pattern used across multiple handlers.
+fn upstream_to_jsonrpc(
+    result: anyhow::Result<UpstreamResponse>,
+    request_id: serde_json::Value,
+) -> JsonRpcResponse {
+    match result {
+        Ok(UpstreamResponse::Ok(value)) => JsonRpcResponse::success(request_id, value),
+        Ok(UpstreamResponse::Err {
+            code,
+            message,
+            data: err_data,
+        }) => {
+            // Upstream returned a JSON-RPC error — propagate it.
+            // Note: code is i64 from upstream, but JsonRpcError uses i32.
+            // Truncation is acceptable for standard JSON-RPC error codes.
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "JSON-RPC error codes fit in i32"
+            )]
+            let code_i32 = code as i32;
+            if let Some(extra) = err_data {
+                JsonRpcResponse::error_with_data(request_id, code_i32, message, extra)
+            } else {
+                JsonRpcResponse::error(request_id, code_i32, message)
+            }
+        }
+        Err(e) => {
+            error!("Failed to forward request: {}", e);
+            JsonRpcResponse::error(
+                request_id,
+                error_code::INTERNAL_ERROR,
+                format!("Internal error: {e}"),
+            )
+        }
+    }
+}
+
+// ============================================================================
 // MCP Method Handlers
 // ============================================================================
 
@@ -155,36 +200,31 @@ pub fn handle_initialize(request_id: serde_json::Value) -> JsonRpcResponse {
     JsonRpcResponse::success(request_id, init_result)
 }
 
-/// Handles a `tools/list` JSON-RPC request by returning a static list of available tools.
+/// Handles a `tools/list` JSON-RPC request by forwarding it to the upstream Bun Docs API.
 ///
-/// Currently, this returns a single tool: `SearchBun`.
+/// The proxy transparently relays the upstream's tool definitions so that clients
+/// receive authoritative, up-to-date descriptions and schemas.
 ///
 /// # Arguments
+/// * `client` - A reference to the `BunDocsClient` for making the API call.
 /// * `request_id` - The request identifier for the response.
 ///
 /// # Returns
-/// A `JsonRpcResponse` containing the list of tools.
-#[must_use]
-pub fn handle_tools_list(request_id: serde_json::Value) -> JsonRpcResponse {
-    // Return available tools
-    let tools = serde_json::json!({
-        "tools": [{
-            "name": "SearchBun",
-            "description": "Search Bun documentation",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Search query"
-                    }
-                },
-                "required": ["query"]
-            }
-        }]
+/// A `JsonRpcResponse` containing the list of tools from upstream.
+#[instrument(name = "tools_list", skip(client))]
+pub async fn handle_tools_list(
+    client: &BunDocsClient,
+    request_id: serde_json::Value,
+) -> JsonRpcResponse {
+    let upstream_request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": "tools/list"
     });
 
-    JsonRpcResponse::success(request_id, tools)
+    let result = client.forward_request(upstream_request).await;
+    info!("tools/list forwarded to upstream");
+    upstream_to_jsonrpc(result, request_id)
 }
 
 /// Handles a `resources/list` JSON-RPC request by returning a static list of available resources.
@@ -252,41 +292,9 @@ pub async fn handle_tools_call(
         "params": request.params
     });
 
-    match client.forward_request(original_request).await {
-        Ok(upstream) => {
-            info!("Successfully got response from Bun Docs");
-            match upstream {
-                UpstreamResponse::Ok(result) => JsonRpcResponse::success(request_id, result),
-                UpstreamResponse::Err {
-                    code,
-                    message,
-                    data: err_data,
-                } => {
-                    // Upstream returned a JSON-RPC error - propagate it
-                    // Note: code is i64 from upstream, but JsonRpcError uses i32
-                    // Truncation is acceptable for standard JSON-RPC error codes
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "JSON-RPC error codes fit in i32"
-                    )]
-                    let code_i32 = code as i32;
-                    if let Some(extra) = err_data {
-                        JsonRpcResponse::error_with_data(request_id, code_i32, message, extra)
-                    } else {
-                        JsonRpcResponse::error(request_id, code_i32, message)
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            error!("Failed to forward request: {}", e);
-            JsonRpcResponse::error(
-                request_id,
-                error_code::INTERNAL_ERROR,
-                format!("Internal error: {e}"),
-            )
-        }
-    }
+    let result = client.forward_request(original_request).await;
+    info!("tools/call forwarded to upstream");
+    upstream_to_jsonrpc(result, request_id)
 }
 
 /// Handles a `resources/read` JSON-RPC request.
@@ -440,34 +448,35 @@ mod tests {
         assert!(serialized["result"]["capabilities"]["tools"].is_object());
     }
 
-    #[test]
-    fn test_handle_tools_list() {
-        let response = handle_tools_list(json!("test-id"));
+    #[tokio::test]
+    async fn test_handle_tools_list_mocked() {
+        // Mock upstream tools/list response
+        let mut server = mockito::Server::new_async().await;
+
+        let mock = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"jsonrpc":"2.0","result":{"tools":[{"name":"SearchBun","description":"Search Bun documentation","inputSchema":{"type":"object","properties":{"query":{"type":"string","description":"Search query"}},"required":["query"]}}]},"id":"test-id"}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let client =
+            http::BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
+
+        let response = handle_tools_list(&client, json!("test-id")).await;
         let serialized = serde_json::to_value(&response).unwrap();
+
+        mock.assert_async().await;
+        drop(server);
 
         assert_eq!(serialized["id"], "test-id");
         assert!(serialized["result"]["tools"].is_array());
 
         let tools = serialized["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["name"], "SearchBun");
-        assert_eq!(
-            tools[0]["inputSchema"]["properties"]["query"]["type"],
-            "string"
-        );
-    }
-
-    #[test]
-    fn test_handle_tools_list_structure() {
-        let response = handle_tools_list(json!(1));
-        let serialized = serde_json::to_value(&response).unwrap();
-
-        // Verify required fields
-        assert!(serialized["result"]["tools"].is_array());
-        let tools = serialized["result"]["tools"].as_array().unwrap();
         assert!(!tools.is_empty());
-
-        // Verify tool structure
+        // Verify structure (not hardcoded values — upstream controls content)
         let tool = &tools[0];
         assert!(tool["name"].is_string());
         assert!(tool["description"].is_string());
@@ -931,18 +940,38 @@ mod tests {
         assert!(init_result["serverInfo"]["version"].is_string());
     }
 
-    #[test]
-    fn tools_list_response_follows_mcp_schema() {
-        // Test that tools/list response follows MCP schema
-        let response = handle_tools_list(json!(1));
+    #[tokio::test]
+    async fn tools_list_response_follows_mcp_schema() {
+        // Test that tools/list response follows MCP schema when forwarded from upstream
+        let mut server = mockito::Server::new_async().await;
+
+        let mock = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"jsonrpc":"2.0","result":{"tools":[{"name":"SearchBun","description":"Search Bun docs","inputSchema":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}]},"id":1}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let client =
+            http::BunDocsClient::with_base_url(&server.url()).expect("valid mock server URL");
+
+        let response = handle_tools_list(&client, json!(1)).await;
         let serialized = serde_json::to_value(&response).unwrap();
+
+        mock.assert_async().await;
+        drop(server);
 
         let tools = serialized["result"]
             .get("tools")
             .expect("tools field exists")
             .as_array()
             .expect("tools is array");
-        assert_eq!(tools.len(), 1_usize);
+        assert!(
+            !tools.is_empty(),
+            "upstream should return at least one tool"
+        );
 
         let tool = tools.first().expect("tools array non-empty");
         assert!(tool.get("name").expect("name field exists").is_string());

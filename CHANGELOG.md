@@ -31,6 +31,11 @@ DO NOT REMOVE THIS COMMENT!
 
 ### Changed
 
+- `tools/list` now forwards to upstream Bun Docs API instead of returning a
+  hardcoded tool list — clients receive authoritative, up-to-date tool
+  definitions
+- Extract `upstream_to_jsonrpc` helper to deduplicate upstream response
+  conversion across handlers
 - All CI workflows use shared `rust-setup` action (DRY)
 - `autofix.yml` switched from `npm` to `bun` for formatter installation
 - `ci.yml` switched from `paths-ignore` to explicit `paths` filter

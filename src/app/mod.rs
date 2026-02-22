@@ -120,7 +120,7 @@ pub async fn run_mcp_server() -> anyhow::Result<()> {
                 Ok(Method::ToolsCall) => {
                     handle_tools_call(&http_client, &request, request_id.clone()).await
                 }
-                Ok(Method::ToolsList) => handle_tools_list(request_id.clone()),
+                Ok(Method::ToolsList) => handle_tools_list(&http_client, request_id.clone()).await,
                 Ok(Method::ResourcesList) => handle_resources_list(request_id.clone()),
                 Ok(Method::ResourcesRead) => {
                     handle_resources_read(&http_client, &request, request_id.clone()).await
