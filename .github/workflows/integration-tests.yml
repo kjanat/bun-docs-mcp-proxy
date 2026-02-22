@@ -4,12 +4,7 @@ name: Integration Tests
 on:
   schedule: [{ cron: "0 3 * * *" }] # Run daily at 3 AM UTC
   workflow_dispatch: # Allow manual trigger
-    inputs:
-      verbose:
-        description: "Enable verbose output"
-        required: false
-        default: false
-        type: boolean
+    inputs: { verbose: { description: "Enable verbose output", required: false, default: false, type: boolean } }
 env: { CARGO_TERM_COLOR: always, RUSTFLAGS: "-D warnings" }
 jobs:
   integration-tests:
@@ -18,15 +13,10 @@ jobs:
     permissions: { contents: read }
     env: { RUST_LOG: "${{ github.event.inputs.verbose == 'true' && 'debug' || 'info' }}" }
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
 
-      - name: Rust setup
-        uses: ./.github/actions/rust-setup
-        with:
-          install-nextest: "true"
-          install-llvm-cov: "true"
-          install-just: "false"
+      - uses: ./.github/actions/rust-setup
+        with: { install-nextest: "true", install-llvm-cov: "true", install-just: "false" }
 
       - name: Run integration tests with nextest
         run: |

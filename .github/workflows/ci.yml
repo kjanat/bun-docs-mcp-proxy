@@ -44,29 +44,21 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Rust setup
-        uses: ./.github/actions/rust-setup
-
-      - name: Run tests
-        run: just test
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/rust-setup
+      - run: just test
 
   coverage:
     name: Code Coverage
     needs: lint
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
 
-      - name: Rust setup
-        uses: ./.github/actions/rust-setup
+      - uses: ./.github/actions/rust-setup
         with: { install-nextest: "true", install-llvm-cov: "true" }
 
-      - name: Run coverage workflow
-        run: just ci-coverage
+      - run: just ci-coverage
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -81,15 +73,10 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Rust setup
-        uses: ./.github/actions/rust-setup
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/rust-setup
         with: { components: "rustfmt, clippy" }
-
-      - name: Run lint checks
-        run: just ci-lint
+      - run: just ci-lint
 
   build-matrix:
     name: Build ${{ matrix.platform.target }}
@@ -120,7 +107,6 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
-          name: bun-docs-mcp-proxy-${{ matrix.platform.target }}
-          path: target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy${{ runner.os == 'Windows' && '.exe' ||
-            '' }}
+          name: "bun-docs-mcp-proxy-${{ matrix.platform.target }}"
+          path: "target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy${{ runner.os == 'Windows' && '.exe' || '' }}"
           retention-days: 1

@@ -7,10 +7,9 @@ jobs:
   autofix:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
-      - uses: ./.github/actions/rust-setup
-        with: { install-just: "false" }
+      - { uses: actions/checkout@v6 }
+      - { uses: oven-sh/setup-bun@v2 }
+      - { uses: ./.github/actions/rust-setup, with: { install-just: "false" } }
 
       - name: Install formatters
         run: bun i -g dprint tombi

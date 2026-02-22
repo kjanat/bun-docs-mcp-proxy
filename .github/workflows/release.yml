@@ -109,8 +109,7 @@ jobs:
       BIN_FILE: bun-docs-mcp-proxy${{ matrix.platform.bin_ext }}
       BIN_DIR: target/${{ matrix.platform.target }}/release
       ARCHIVE_NAME: bun-docs-mcp-proxy-${{ matrix.platform.name }}.${{ matrix.platform.archive_ext }}
-      ARCHIVE_PATH: |
-        target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.${{matrix.platform.archive_ext }}
+      ARCHIVE_PATH: target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.${{matrix.platform.archive_ext }}
       TARGET: ${{ matrix.platform.target }}
       CROSS: ${{ matrix.platform.cross }}
       ARCHIVE_EXT: ${{ matrix.platform.archive_ext }}
@@ -133,7 +132,7 @@ jobs:
 
       - name: Install Zig
         if: matrix.platform.cross
-        uses: goto-bus-stop/setup-zig@v2
+        uses: goto-bus-stop/setup-zig@v2.2.1
 
       - name: Install cargo-zigbuild
         if: matrix.platform.cross
@@ -165,8 +164,7 @@ jobs:
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
-        with:
-          { name: "bun-docs-mcp-proxy-${{ matrix.platform.name }}", path: "${{ env.ARCHIVE_PATH }}" }
+        with: { name: "bun-docs-mcp-proxy-${{ matrix.platform.name }}", path: "${{ env.ARCHIVE_PATH }}" }
 
   release:
     name: Create Release
