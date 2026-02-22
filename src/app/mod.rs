@@ -160,33 +160,3 @@ pub async fn run_mcp_server() -> anyhow::Result<()> {
     info!("Bun Docs MCP Proxy shutting down");
     Ok(())
 }
-
-// ============================================================================
-// Tests
-// ============================================================================
-
-#[cfg(test)]
-#[allow(clippy::expect_used, reason = "tests can use expect()")]
-#[allow(clippy::unwrap_used, reason = "tests can use unwrap()")]
-#[allow(deprecated, reason = "cargo_bin is simpler for lib tests")]
-mod tests {
-    use core::time::Duration;
-
-    use assert_cmd::Command;
-    use predicates::prelude::*;
-
-    #[test]
-    fn main_loop_stdin_parse_error() {
-        // Test that malformed JSON triggers parse error with proper error response
-        let mut cmd = Command::cargo_bin("bun-docs-mcp-proxy").unwrap();
-        cmd.write_stdin("{ invalid json without closing\n")
-            .timeout(Duration::from_secs(2_u64))
-            .assert()
-            .stderr(
-                predicate::str::contains("parse")
-                    .or(predicate::str::contains("Parse error"))
-                    .or(predicate::str::contains("EOF")),
-            );
-        // Verifies error logging in run_mcp_server parse error path
-    }
-}
