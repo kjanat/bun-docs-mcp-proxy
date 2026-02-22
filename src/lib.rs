@@ -23,8 +23,7 @@ pub mod util;
 pub use app::run_mcp_server;
 pub use io::{StdioTransport, Transport};
 pub use mcp::{
-    BUN_URI_HOST, BUN_URI_SCHEME, JsonRpcEnvelope, JsonRpcError, JsonRpcErrorObject,
-    JsonRpcRequest, JsonRpcResponse, LINK_MARKER, MCP_PROTOCOL_VERSION, Method, SERVER_NAME,
-    content_type, error_code,
+    JsonRpcEnvelope, JsonRpcError, JsonRpcErrorObject, JsonRpcRequest, JsonRpcResponse,
+    LINK_MARKER, MCP_PROTOCOL_VERSION, Method, SERVER_NAME, content_type, error_code,
 };
 pub use upstream::{BunDocsClient, BunDocsClientBuilder, BunDocsClientConfig, UpstreamResponse};

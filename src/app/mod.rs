@@ -5,10 +5,7 @@
 
 pub mod handlers;
 
-use handlers::{
-    handle_initialize, handle_resources_list, handle_resources_read, handle_tools_call,
-    handle_tools_list,
-};
+use handlers::{handle_initialize, handle_tools_call, handle_tools_list};
 use tracing::{Instrument as _, debug, error, info, info_span};
 
 use crate::{
@@ -121,11 +118,9 @@ pub async fn run_mcp_server() -> anyhow::Result<()> {
                     handle_tools_call(&http_client, &request, request_id.clone()).await
                 }
                 Ok(Method::ToolsList) => handle_tools_list(&http_client, request_id.clone()).await,
-                Ok(Method::ResourcesList) => handle_resources_list(request_id.clone()),
-                Ok(Method::ResourcesRead) => {
-                    handle_resources_read(&http_client, &request, request_id.clone()).await
+                Ok(Method::Initialize) => {
+                    handle_initialize(&http_client, &request, request_id.clone()).await
                 }
-                Ok(Method::Initialize) => handle_initialize(request_id.clone()),
                 Ok(Method::NotificationsInitialized) => {
                     debug!("Unexpected notifications/initialized with id");
                     JsonRpcResponse::success(request_id.clone(), serde_json::Value::Null)

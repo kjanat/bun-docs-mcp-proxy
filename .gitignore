@@ -409,3 +409,4 @@ Temporary Items
 # End of https://gitignore.kjanat.com/api/rust,rust-analyzer,node,linux,windows,macos
 /cli_*
 /test_*
+specs/

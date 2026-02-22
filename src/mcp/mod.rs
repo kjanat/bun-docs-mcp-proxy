@@ -28,10 +28,6 @@ pub enum Method {
     ToolsList,
     /// Call a tool
     ToolsCall,
-    /// List available resources
-    ResourcesList,
-    /// Read a resource
-    ResourcesRead,
     /// Notification that client is initialized (no response expected)
     NotificationsInitialized,
 }
@@ -44,8 +40,6 @@ impl Method {
             Self::Initialize => "initialize",
             Self::ToolsList => "tools/list",
             Self::ToolsCall => "tools/call",
-            Self::ResourcesList => "resources/list",
-            Self::ResourcesRead => "resources/read",
             Self::NotificationsInitialized => "notifications/initialized",
         }
     }
@@ -65,8 +59,6 @@ impl FromStr for Method {
             "initialize" => Ok(Self::Initialize),
             "tools/list" => Ok(Self::ToolsList),
             "tools/call" => Ok(Self::ToolsCall),
-            "resources/list" => Ok(Self::ResourcesList),
-            "resources/read" => Ok(Self::ResourcesRead),
             "notifications/initialized" => Ok(Self::NotificationsInitialized),
             _ => Err(()),
         }
@@ -96,12 +88,6 @@ pub const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 
 /// Server name for MCP initialization.
 pub const SERVER_NAME: &str = "bun-docs-mcp-proxy";
-
-/// URI scheme prefix for Bun documentation resources.
-pub const BUN_URI_SCHEME: &str = "bun";
-
-/// URI host for Bun documentation resources.
-pub const BUN_URI_HOST: &str = "docs";
 
 /// Line marker prefix for documentation links in search results.
 pub const LINK_MARKER: &str = "Link: ";
@@ -135,8 +121,6 @@ mod tests {
         assert_eq!(Method::Initialize.as_str(), "initialize");
         assert_eq!(Method::ToolsList.as_str(), "tools/list");
         assert_eq!(Method::ToolsCall.as_str(), "tools/call");
-        assert_eq!(Method::ResourcesList.as_str(), "resources/list");
-        assert_eq!(Method::ResourcesRead.as_str(), "resources/read");
         assert_eq!(
             Method::NotificationsInitialized.as_str(),
             "notifications/initialized"
@@ -155,14 +139,6 @@ mod tests {
         assert_eq!("tools/list".parse::<Method>(), Ok(Method::ToolsList));
         assert_eq!("tools/call".parse::<Method>(), Ok(Method::ToolsCall));
         assert_eq!(
-            "resources/list".parse::<Method>(),
-            Ok(Method::ResourcesList)
-        );
-        assert_eq!(
-            "resources/read".parse::<Method>(),
-            Ok(Method::ResourcesRead)
-        );
-        assert_eq!(
             "notifications/initialized".parse::<Method>(),
             Ok(Method::NotificationsInitialized)
         );
@@ -173,6 +149,8 @@ mod tests {
         let _: () = "unknown".parse::<Method>().unwrap_err();
         let _: () = "".parse::<Method>().unwrap_err();
         let _: () = "Initialize".parse::<Method>().unwrap_err(); // case sensitive
+        let _: () = "resources/list".parse::<Method>().unwrap_err(); // removed
+        let _: () = "resources/read".parse::<Method>().unwrap_err(); // removed
     }
 
     #[test]
@@ -186,8 +164,6 @@ mod tests {
     fn protocol_constants() {
         assert_eq!(MCP_PROTOCOL_VERSION, "2024-11-05");
         assert_eq!(SERVER_NAME, "bun-docs-mcp-proxy");
-        assert_eq!(BUN_URI_SCHEME, "bun");
-        assert_eq!(BUN_URI_HOST, "docs");
         assert_eq!(LINK_MARKER, "Link: ");
     }
 

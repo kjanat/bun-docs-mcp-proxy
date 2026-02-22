@@ -22,6 +22,10 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 ### Changed
 
+- **BREAKING:** `initialize` now forwards to upstream Bun Docs API — proxy
+  returns upstream's capabilities and protocol version, overriding only
+  `serverInfo` with proxy identity; falls back to minimal hardcoded response
+  (tools-only) if upstream is unreachable
 - `tools/list` now forwards to upstream Bun Docs API instead of returning a
   hardcoded tool list — clients receive authoritative, up-to-date tool
   definitions
@@ -51,6 +55,11 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 ### Removed
 
+- **BREAKING:** `resources/list` and `resources/read` methods — upstream doesn't
+  support resources (`-32601`); removed `handle_resources_list`,
+  `handle_resources_read`, `parse_bun_docs_uri`, `get_string_param`,
+  `BUN_URI_SCHEME`, `BUN_URI_HOST` constants, and `Method::ResourcesList` /
+  `Method::ResourcesRead` variants
 - `claude-code-review.yml` (merged into `claude.yml`)
 - `macos-15-intel` (x86_64-apple-darwin) from CI build matrix
 - `jq` as a CI test dependency
