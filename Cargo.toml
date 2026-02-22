@@ -145,6 +145,11 @@ wildcard_enum_match_arm           = "warn"
 level    = "warn"
 priority = -1
 
+# hashbrown 0.15 (wasmparser) vs 0.16 (indexmap) — transitive, not ours to fix
+[lints.clippy.multiple_crate_versions]
+level    = "allow"
+priority = 1
+
 [lints.clippy.nursery]
 level    = "warn"
 priority = -1
