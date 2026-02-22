@@ -5,15 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog], and this project adheres to
 [Semantic Versioning].
 
-<!--
-## [Unreleased]
-
-Switch to typescript-based MCP proxy for easier maintenance and quicker
-development.
-
-DO NOT REMOVE THIS COMMENT!
--->
-
 ## [Unreleased]
 
 ### Added
