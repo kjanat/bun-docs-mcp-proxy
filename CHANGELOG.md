@@ -7,6 +7,28 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- CI lint jobs missing `dprint` and `tombi` formatters — added
+  `bun i -g dprint
+  tombi` (mirrors `autofix.yml`)
+- `fmt-check` recipe used stable `cargo fmt` but `rustfmt.toml` requires
+  nightly-only options (`imports_granularity`, `group_imports`) — now uses
+  `cargo +nightly fmt`; CI installs nightly toolchain
+- Binary integration test (`main_loop_stdin_parse_error`) failed under
+  `cargo test` and `cargo-llvm-cov` — `assert_cmd::Command::cargo_bin()` used
+  escargot fallback which conflicts with llvm-cov's rustc wrapper; moved to
+  `tests/cli.rs` integration test using `cargo_bin_cmd!` macro (uses
+  `CARGO_BIN_EXE_*` env var, no escargot)
+- `coverage-nextest` recipe double-wrapped rustc via `show-env` +
+  `cargo llvm-cov nextest` causing `Resource temporarily unavailable` fork
+  failures — split into `cargo nextest run` + `cargo llvm-cov report`
+
+### Changed
+
+- Removed redundant `test` CI job — `coverage` job is a strict superset (same
+  tests + coverage instrumentation)
+
 ## [2.0.0] - 2026-02-22
 
 ### Added

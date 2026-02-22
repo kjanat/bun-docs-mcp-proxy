@@ -39,15 +39,6 @@ permissions: { contents: read }
 # - CI: See .github/workflows/integration-tests.yml (scheduled daily + manual)
 
 jobs:
-  test:
-    name: Test
-    needs: lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/rust-setup
-      - run: just test
-
   coverage:
     name: Code Coverage
     needs: lint
@@ -84,7 +75,7 @@ jobs:
 
   build-matrix:
     name: Build ${{ matrix.platform.target }}
-    needs: test
+    needs: coverage
     runs-on: ${{ matrix.platform.os }}
     strategy:
       fail-fast: false
