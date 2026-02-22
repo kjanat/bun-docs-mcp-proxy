@@ -12,7 +12,7 @@ jobs:
       - { uses: ./.github/actions/rust-setup, with: { install-just: "false" } }
 
       - name: Install formatters
-        run: bun i -g dprint tombi
+        run: bun i -g dprint tombi --trust
 
       - name: Format all files
         run: dprint fmt --allow-no-files --excludes ".github"

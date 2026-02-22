@@ -6,9 +6,12 @@ on:
   push: { tags: ["v*.*.*"] }
   workflow_dispatch:
     inputs:
-      tag: { description: "Tag to release (e.g., v1.2.3)", required: false, type: string }
-      draft: { description: "Create as a draft", required: false, default: false, type: boolean }
-      prerelease: { description: "Mark as prerelease", required: false, default: false, type: boolean }
+      tag:
+        { description: "Tag to release (e.g., v1.2.3)", required: false, type: string }
+      draft:
+        { description: "Create as a draft", required: false, default: false, type: boolean }
+      prerelease:
+        { description: "Mark as prerelease", required: false, default: false, type: boolean }
 concurrency: { group: "release-${{ github.ref }}", cancel-in-progress: false }
 env: { CARGO_TERM_COLOR: always, RUSTFLAGS: "-D warnings" }
 defaults: { run: { shell: bash } }
@@ -88,7 +91,7 @@ jobs:
 
       - run: rustup toolchain install nightly --component rustfmt
       - uses: oven-sh/setup-bun@v2
-      - run: bun i -g dprint tombi
+      - run: bun i -g dprint tombi --trust
 
       - name: Run lint checks
         run: just ci-lint
@@ -155,7 +158,8 @@ jobs:
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
-        with: { name: "bun-docs-mcp-proxy-${{ matrix.platform.name }}", path: "${{ env.ARCHIVE_PATH }}", retention-days: 1 }
+        with:
+          { name: "bun-docs-mcp-proxy-${{ matrix.platform.name }}", path: "${{ env.ARCHIVE_PATH }}", retention-days: 1 }
 
   release:
     name: Create Release

@@ -22,14 +22,15 @@ jobs:
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubuntu-latest
-    permissions: { contents: read, pull-requests: read, issues: read, id-token: write, actions: read }
+    permissions:
+      { contents: read, pull-requests: read, issues: read, id-token: write, actions: read }
     steps:
       - uses: actions/checkout@v6
         with: { fetch-depth: 0 }
-
+      - uses: oven-sh/setup-bun@v2
       - name: Install tools
         run: |
-          npm i -g lefthook dprint tombi
+          bun i -g lefthook dprint tombi --trust
           lefthook install
 
       - name: Run Claude Code
@@ -63,15 +64,16 @@ jobs:
   claude-review:
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
-    permissions: { contents: read, pull-requests: read, issues: read, id-token: write }
+    permissions:
+      { contents: read, pull-requests: read, issues: read, id-token: write }
 
     steps:
       - uses: actions/checkout@v6
         with: { fetch-depth: 0 }
-
+      - uses: oven-sh/setup-bun@v2
       - name: Install tools
         run: |
-          npm i -g lefthook dprint tombi
+          bun i -g lefthook dprint tombi --trust
           lefthook install
 
       - name: Run Claude Code Review
