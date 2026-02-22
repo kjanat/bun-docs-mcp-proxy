@@ -6,35 +6,18 @@ on:
   push: { tags: ["v*.*.*"] }
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Tag to release (e.g., v1.2.3)"
-        required: false
-        type: string
-      draft:
-        description: "Create as a draft"
-        required: false
-        default: false
-        type: boolean
-      prerelease:
-        description: "Mark as prerelease"
-        required: false
-        default: false
-        type: boolean
-
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
-
-env:
-  CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
-
+      tag: { description: "Tag to release (e.g., v1.2.3)", required: false, type: string }
+      draft: { description: "Create as a draft", required: false, default: false, type: boolean }
+      prerelease: { description: "Mark as prerelease", required: false, default: false, type: boolean }
+concurrency: { group: "release-${{ github.ref }}", cancel-in-progress: false }
+env: { CARGO_TERM_COLOR: always, RUSTFLAGS: "-D warnings" }
+defaults: { run: { shell: bash } }
 jobs:
   define-matrix:
     name: Define Build Matrix
     runs-on: ubuntu-latest
-    outputs:
-      platforms: ${{ steps.matrix.outputs.platforms }}
+    outputs: { platforms: "${{ steps.matrix.outputs.platforms }}" }
+    permissions: { contents: read }
     steps:
       - name: Build matrix JSON
         id: matrix
@@ -93,7 +76,6 @@ jobs:
         with: { components: "rustfmt, clippy" }
 
       - name: Verify version matches tag
-        shell: bash
         run: |
           CARGO_VERSION=$(cargo pkgid | cut -d# -f2)
           REF="${{ github.event.inputs.tag || github.ref }}"
@@ -128,8 +110,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+        with: { ref: "${{ github.event.inputs.tag || github.ref }}" }
 
       - name: Rust setup
         uses: ./.github/actions/rust-setup
@@ -147,7 +128,6 @@ jobs:
         uses: taiki-e/install-action@cargo-zigbuild
 
       - name: Build
-        shell: bash
         run: |
           set -euo pipefail
           if [[ "${CROSS}" == "true" ]]; then
@@ -157,7 +137,6 @@ jobs:
           fi
 
       - name: Package
-        shell: bash
         working-directory: ${{ env.BIN_DIR }}
         run: |
           if [[ "${ARCHIVE_EXT}" == "zip" ]]; then
@@ -180,8 +159,7 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '')
     permissions: { contents: write }
-    env:
-      REF: "${{ github.event.inputs.tag || github.ref }}"
+    env: { REF: "${{ github.event.inputs.tag || github.ref }}" }
     steps:
       - name: Checkout
         uses: actions/checkout@v6
