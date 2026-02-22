@@ -41,14 +41,10 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
-            const arches = ["aarch64", "x86_64"] as const;
-            const libcs = ["gnu", "musl"] as const;
+            const arches = ["aarch64", "x86_64"];
+            const libcs = ["gnu", "musl"];
 
-            type Arch = typeof arches[number];
-            type Libc = typeof libcs[number];
-            type Fam = "macos" | "linux" | "windows";
-
-            const mk = (os: string, name: string, target: string, label: string) => {
+            const mk = (os, name, target, label) => {
               const win = os[0] === "w";
               return {
                 os,
@@ -61,7 +57,7 @@ jobs:
               };
             };
 
-            const label = (fam: Fam, arch: Arch, libc?: Libc) =>
+            const label = (fam, arch, libc) =>
               fam === "macos"
                 ? (arch === "x86_64" ? "macOS Intel" : "macOS Apple Silicon")
                 : fam === "windows"
@@ -81,7 +77,7 @@ jobs:
               ...arches.map(a => mk("windows-latest", `windows-${a}`, `${a}-pc-windows-msvc`, label("windows", a))),
             ];
 
-            core.info("Defined platforms:", JSON.stringify(platforms));
+            core.info(`Defined platforms: ${JSON.stringify(platforms)}`);
             core.setOutput("platforms", JSON.stringify(platforms));
   lint:
     name: Pre-release Lint
@@ -95,6 +91,18 @@ jobs:
       - name: Rust setup
         uses: ./.github/actions/rust-setup
         with: { components: "rustfmt, clippy" }
+
+      - name: Verify version matches tag
+        shell: bash
+        run: |
+          CARGO_VERSION=$(cargo pkgid | cut -d# -f2)
+          REF="${{ github.event.inputs.tag || github.ref }}"
+          TAG_VERSION="${REF#refs/tags/}"
+          TAG_VERSION="${TAG_VERSION#v}"
+          if [[ "$CARGO_VERSION" != "$TAG_VERSION" ]]; then
+            echo "::error::Cargo.toml version ($CARGO_VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
 
       - name: Run lint checks
         run: just ci-lint
@@ -164,7 +172,7 @@ jobs:
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
-        with: { name: "bun-docs-mcp-proxy-${{ matrix.platform.name }}", path: "${{ env.ARCHIVE_PATH }}" }
+        with: { name: "bun-docs-mcp-proxy-${{ matrix.platform.name }}", path: "${{ env.ARCHIVE_PATH }}", retention-days: 1 }
 
   release:
     name: Create Release

@@ -1,4 +1,4 @@
-import type { JsonRecord } from "./types";
+import type { Artifact, JsonRecord } from "./types";
 
 export const isRecord = (value: unknown): value is JsonRecord => typeof value === "object" && value !== null;
 
@@ -34,4 +34,9 @@ export const normalizeTag = (value: string | undefined): string | undefined => {
   if (trimmed.startsWith("refs/tags/")) return trimmed.slice("refs/tags/".length);
   if (trimmed.startsWith("refs/")) return undefined;
   return trimmed;
+};
+
+export const isArtifact = (value: unknown): value is Artifact => {
+  if (!isRecord(value)) return false;
+  return typeof value.id === "number" && typeof value.name === "string" && typeof value.expired === "boolean";
 };

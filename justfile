@@ -356,9 +356,14 @@ ci: build test fmt-check clippy
 [group('ci')]
 ci-coverage: coverage-nextest
 
+# Check dependency licenses and advisories
+[group('lint')]
+deny *args:
+    cargo deny check {{ args }}
+
 # Run CI lint workflow locally
 [group('ci')]
-ci-lint: fmt-check clippy
+ci-lint: fmt-check clippy deny
 
 # Run complete CI pipeline locally
 [group('ci')]

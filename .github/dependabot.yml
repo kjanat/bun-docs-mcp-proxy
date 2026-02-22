@@ -5,7 +5,7 @@ updates:
   # Cargo dependencies
   - package-ecosystem: "cargo"
     directory: "/"
-    schedule: { interval: "weekly" }
+    schedule: { interval: monthly }
     labels: ["dependencies", "rust"]
     open-pull-requests-limit: 2
     groups: { cargo-dependencies: { patterns: ["*"] } }
@@ -13,7 +13,15 @@ updates:
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
-    schedule: { interval: "weekly" }
+    schedule: { interval: monthly }
     labels: ["dependencies", "github-actions"]
     open-pull-requests-limit: 2
     groups: { github-actions: { patterns: ["*"] } }
+
+  # npm (custom GitHub Actions)
+  - package-ecosystem: "bun"
+    directory: "/.github/actions"
+    schedule: { interval: monthly }
+    labels: ["dependencies", "javascript"]
+    open-pull-requests-limit: 2
+    groups: { npm-dependencies: { patterns: ["*"] } }

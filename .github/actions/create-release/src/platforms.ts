@@ -6,7 +6,10 @@ const isPlatformDefinition = (value: unknown): value is PlatformDefinition => {
   return typeof value.name === "string" && typeof value.archive_ext === "string";
 };
 
-export const parsePlatforms = (input: string | undefined): PlatformDefinition[] => {
+export const parsePlatforms = (
+  input: string | undefined,
+  warn: (msg: string) => void = console.warn,
+): PlatformDefinition[] => {
   if (!input) return [];
 
   try {
@@ -20,7 +23,8 @@ export const parsePlatforms = (input: string | undefined): PlatformDefinition[] 
       : [];
 
     return list.filter(isPlatformDefinition);
-  } catch {
+  } catch (err) {
+    warn(`Failed to parse matrix_json, using fallback platforms: ${err}`);
     return [];
   }
 };

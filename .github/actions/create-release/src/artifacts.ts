@@ -1,8 +1,8 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import { ensureDir, hashFile, normalizeArtifactDisplayPath, removePath, toBuffer, walk } from "./fs-utils";
+import { isArtifact } from "./guards";
 import type { GitHubClient } from "./types";
-import type { Artifact } from "./types";
 
 type ExecFn = (commandLine: string, args?: string[]) => Promise<number>;
 
@@ -35,15 +35,14 @@ export const collectArtifacts = async ({
   await ensureDir(artifactsDir);
   await ensureDir(tmpDir);
 
-  const artifacts = await github.paginate<Artifact>(github.actions.listWorkflowRunArtifacts, {
-    owner,
-    repo,
-    run_id: runId,
-    per_page: 100,
-  });
+  const response = await github.paginate(
+    "GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts",
+    { owner, repo, run_id: runId, per_page: 100 },
+  );
 
-  for (const artifact of artifacts) {
-    if (artifact.expired) continue;
+  for (const item of response) {
+    if (!isArtifact(item) || item.expired) continue;
+    const artifact = item;
 
     const zipPath = path.join(tmpDir, `${artifact.name}.zip`);
     const destDir = path.join(artifactsDir, artifact.name);

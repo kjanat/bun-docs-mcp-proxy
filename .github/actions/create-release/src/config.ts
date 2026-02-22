@@ -46,7 +46,7 @@ export const resolveConfig = (
   const tmpBase = process.env.RUNNER_TEMP || os.tmpdir();
   const tmpDir = path.join(tmpBase, `release-${Date.now()}`);
 
-  const platforms = parsePlatforms(toInputString(tools.inputs.matrix_json));
+  const platforms = parsePlatforms(toInputString(tools.inputs.matrix_json), (msg) => tools.log.warn(msg));
 
   return {
     version,

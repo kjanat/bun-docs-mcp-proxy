@@ -36,4 +36,10 @@ runs:
       run: bun --cwd="${{ github.action_path }}" i --frozen-lockfile
     - shell: bash
       id: create_release
+      env:
+        INPUT_TAG: ${{ inputs.tag }}
+        INPUT_DRAFT: ${{ inputs.draft }}
+        INPUT_PRERELEASE: ${{ inputs.prerelease }}
+        INPUT_GITHUB_TOKEN: ${{ inputs.github_token }}
+        INPUT_MATRIX_JSON: ${{ inputs.matrix_json }}
       run: bun --cwd="${{ github.action_path }}" --bun src/index.ts

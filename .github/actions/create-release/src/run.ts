@@ -4,13 +4,13 @@ import * as path from "path";
 import { collectArtifacts } from "./artifacts";
 import { resolveConfig } from "./config";
 import { buildReleaseNotes } from "./release-notes";
-import type { GitHubClient, ReleaseInputs, ReleaseOutputs } from "./types";
+import type { ReleaseInputs, ReleaseOutputs } from "./types";
 
 export const run = async (tools: Toolkit<ReleaseInputs, ReleaseOutputs>): Promise<void> => {
   const config = resolveConfig(tools);
   if (!config) return;
 
-  const github = tools.github as GitHubClient;
+  const github = tools.github;
 
   const { artifactFiles, checksumsPath, checksums } = await collectArtifacts({
     github,
@@ -34,13 +34,15 @@ export const run = async (tools: Toolkit<ReleaseInputs, ReleaseOutputs>): Promis
     platforms: config.platforms,
   });
 
+  // Always create as draft first, then publish after all assets are uploaded.
+  // This prevents partial releases if asset uploads fail midway.
   const release = await github.repos.createRelease({
     owner: config.owner,
     repo: config.repo,
     tag_name: config.version,
     name: `Release ${config.version}`,
     body: notes,
-    draft: config.draft,
+    draft: true,
     prerelease: config.prerelease,
   });
 
@@ -60,11 +62,22 @@ export const run = async (tools: Toolkit<ReleaseInputs, ReleaseOutputs>): Promis
       repo: config.repo,
       release_id: release.data.id,
       name,
+      // @ts-expect-error Octokit v17 types expect string but Buffer works at runtime
       data,
       headers: {
         "content-type": contentType,
         "content-length": data.length,
       },
+    });
+  }
+
+  // Un-draft the release now that all assets are uploaded (unless user requested draft)
+  if (!config.draft) {
+    await github.repos.updateRelease({
+      owner: config.owner,
+      repo: config.repo,
+      release_id: release.data.id,
+      draft: false,
     });
   }
 

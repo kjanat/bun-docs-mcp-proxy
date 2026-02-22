@@ -1,7 +1,11 @@
+import type { Toolkit } from "actions-toolkit";
 import type { InputType } from "actions-toolkit/lib/inputs";
 import type { OutputType } from "actions-toolkit/lib/outputs";
 
 export type JsonRecord = Record<string, unknown>;
+
+/** Octokit client type extracted from actions-toolkit's Toolkit class. */
+export type GitHubClient = Toolkit["github"];
 
 export type ReleaseInputs = InputType & {
   tag?: string;
@@ -46,36 +50,4 @@ export type ReleaseConfig = {
   artifactsDir: string;
   tmpDir: string;
   platforms: PlatformDefinition[];
-};
-
-export type GitHubClient = {
-  paginate: <T>(route: unknown, params: unknown) => Promise<T[]>;
-  actions: {
-    listWorkflowRunArtifacts: unknown;
-    downloadArtifact: (params: {
-      owner: string;
-      repo: string;
-      artifact_id: number;
-      archive_format: "zip";
-    }) => Promise<{ data: unknown }>;
-  };
-  repos: {
-    createRelease: (params: {
-      owner: string;
-      repo: string;
-      tag_name: string;
-      name: string;
-      body: string;
-      draft: boolean;
-      prerelease: boolean;
-    }) => Promise<{ data: { id: number; html_url: string } }>;
-    uploadReleaseAsset: (params: {
-      owner: string;
-      repo: string;
-      release_id: number;
-      name: string;
-      data: Buffer;
-      headers: { "content-type": string; "content-length": number };
-    }) => Promise<unknown>;
-  };
 };
