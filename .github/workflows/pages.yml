@@ -1,18 +1,14 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
+---
 name: Deploy Docs to GitHub Pages
 
 on:
   push:
     branches: ["master"]
-    paths:
-      - "docs/**"
-      - "**.md"
-      - ".github/workflows/pages.yml"
+    paths: ["docs/**", "**.md", ".github/workflows/pages.yml"]
   pull_request:
     branches: ["master"]
-    paths:
-      - "docs/**"
-      - "**.md"
-      - ".github/workflows/pages.yml"
+    paths: ["docs/**", "**.md", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -38,14 +34,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install just
-        uses: extractions/setup-just@v3
+      - name: Rust setup
+        uses: ./.github/actions/rust-setup
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

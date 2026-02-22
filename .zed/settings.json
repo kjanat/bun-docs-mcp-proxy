@@ -1,7 +1,5 @@
 {
-  "formatter": [
-    { "external": { "command": "dprint", "arguments": ["fmt", "--stdin", "{buffer_path}"] } }
-  ],
+  "formatter": [{ "external": { "command": "dprint", "arguments": ["fmt", "--stdin", "{buffer_path}"] } }],
   "prettier": { "allowed": false },
   "wrap_guides": [80],
   "languages": {

@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-action.json
+---
+name: Create release
+description: Create a GitHub release with built artifacts and checksums.
+author: kjanat
+branding: { icon: tag, color: blue }
+inputs:
+  tag:
+    description: Tag to release (e.g. v1.2.3). Defaults to the current ref.
+    required: false
+    default: ${{ github.ref }}
+  draft:
+    description: Create as a draft release.
+    required: false
+    default: "false"
+  prerelease:
+    description: Mark as prerelease.
+    required: false
+    default: "false"
+  github_token:
+    description: GitHub token for API requests.
+    required: false
+    default: ${{ github.token }}
+  matrix_json:
+    description: JSON array of platform definitions for release notes.
+    required: false
+outputs:
+  release_id: { description: "GitHub release id.", value: "${{ steps.create_release.outputs.release_id }}" }
+  release_url: { description: "GitHub release URL.", value: "${{ steps.create_release.outputs.release_url }}" }
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@v2
+    - shell: bash
+      run: bun i
+    - shell: bash
+      id: create_release
+      run: ${{ github.action_path }}/src/index.ts

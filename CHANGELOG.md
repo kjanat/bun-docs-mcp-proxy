@@ -21,13 +21,44 @@ DO NOT REMOVE THIS COMMENT!
 - `deny.toml` for cargo-deny license/security policy
 - Concurrency group in `release.yml` to prevent duplicate releases
 - `*.profraw`, `*.profdata`, `tools/websockets.*` to `.gitignore`
+- Reusable `rust-setup` composite action for CI (toolchain, cache, tools)
+- `create-release` composite action (Node 24) for automated GitHub releases
+- Dynamic build matrix in `release.yml` via `actions/github-script`
+- `workflow_dispatch` + `merge_group` triggers for CI
+- `workflow_dispatch` inputs (tag, draft, prerelease) for release workflow
+- Build artifact uploads in CI workflow
+- `pull_request` trigger for Claude code review (merged into `claude.yml`)
 
 ### Changed
 
+- All CI workflows use shared `rust-setup` action (DRY)
+- `autofix.yml` switched from `npm` to `bun` for formatter installation
+- `ci.yml` switched from `paths-ignore` to explicit `paths` filter
+- `ci.yml` test step uses `just test` instead of `just ci`
+- `release.yml` build/package/attest steps consolidated into OS-agnostic blocks
+- `integration-tests.yml` switched from `codecov/test-results-action@v1` to
+  `codecov/codecov-action@v5`
+- Claude code review merged from standalone workflow into `claude.yml`
+- Claude model parameterized via `env.MODEL`
+- Codecov uploads no longer use explicit token (tokenless)
+- `dependabot.yml` compacted to inline YAML style
+- `Cargo.toml` dependencies reformatted to `[dependencies.X]` table sections
+- `Cargo.toml` lint groups moved to dedicated `[lints.clippy.X]` table sections
+- dprint plugins updated (typescript 0.95.13 -> 0.95.15, markdown 0.20.0 ->
+  0.21.1)
+- dprint YAML `printWidth` 120 -> 150
+- `CLAUDE.md` is now a symlink to `AGENTS.md`
 - Moved JS/TS tooling to `tools/` directory (was root + `scripts/`)
 - Expanded `bacon.toml` with project-specific jobs and keybindings
 - Updated `SECURITY.md` supported versions (1.x supported, <1.0.0 unsupported)
 - Updated `CONTRIBUTING.md` Rust version requirement (1.85.0+, edition 2024)
+
+### Removed
+
+- `claude-code-review.yml` (merged into `claude.yml`)
+- `macos-15-intel` (x86_64-apple-darwin) from CI build matrix
+- `jq` as a CI test dependency
+- Redundant standalone `cargo test` run in `integration-tests.yml`
 
 ### Fixed
 

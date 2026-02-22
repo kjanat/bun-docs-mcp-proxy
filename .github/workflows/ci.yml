@@ -1,23 +1,34 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
+---
 name: CI
 
 on:
   push:
     branches: [master]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "LICENSE"
-      - ".gitignore"
+    paths:
+      - "**/*.rs"
+      - "Cargo.*"
+      - "**/*.toml"
+      - "justfile"
+      - ".github/actions/**"
+      - ".github/workflows/ci.yml"
   pull_request:
     branches: [master]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "LICENSE"
-      - ".gitignore"
+    paths:
+      - "**/*.rs"
+      - "Cargo.*"
+      - "**/*.toml"
+      - "justfile"
+      - ".github/actions/**"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch:
+  merge_group:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+permissions: { contents: read }
 
 # This CI workflow runs fast, network-free unit tests by default.
 # Integration tests that require real API calls to bun.com are disabled
@@ -32,96 +43,50 @@ jobs:
     name: Test
     needs: lint
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    env:
-      RUSTFLAGS: -D warnings
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Rust setup
+        uses: ./.github/actions/rust-setup
 
-      - name: Cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install just
-        uses: extractions/setup-just@v3
-
-      - name: Install test dependencies
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Run CI checks
-        run: just ci
+      - name: Run tests
+        run: just test
 
   coverage:
     name: Code Coverage
     needs: lint
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    env:
-      CARGO_TERM_COLOR: always
-      RUSTFLAGS: -D warnings
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install just
-        uses: extractions/setup-just@v3
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@nextest
+      - name: Rust setup
+        uses: ./.github/actions/rust-setup
+        with: { install-nextest: "true", install-llvm-cov: "true" }
 
       - name: Run coverage workflow
         run: just ci-coverage
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: codecov.json
-          fail_ci_if_error: true
+        with: { files: codecov.json, fail_ci_if_error: true }
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
         uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          report_type: test_results
-          files: target/nextest/ci/junit.xml
+        with: { report_type: test_results, files: target/nextest/ci/junit.xml }
 
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    env:
-      RUSTFLAGS: -D warnings
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install just
-        uses: extractions/setup-just@v3
+      - name: Rust setup
+        uses: ./.github/actions/rust-setup
+        with: { components: "rustfmt, clippy" }
 
       - name: Run lint checks
         run: just ci-lint
@@ -130,15 +95,10 @@ jobs:
     name: Build ${{ matrix.platform.target }}
     needs: test
     runs-on: ${{ matrix.platform.os }}
-    permissions:
-      contents: read
-    env:
-      RUSTFLAGS: -D warnings
     strategy:
       fail-fast: false
       matrix:
         platform:
-          - { os: macos-15-intel, target: x86_64-apple-darwin }
           - { os: macos-latest, target: aarch64-apple-darwin }
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
@@ -147,13 +107,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with: { targets: "${{ matrix.platform.target }}" }
-
-      - name: Cache
-        uses: Swatinem/rust-cache@v2
-        with: { key: "${{ matrix.platform.target }}" }
+      - name: Rust setup
+        uses: ./.github/actions/rust-setup
+        with:
+          targets: ${{ matrix.platform.target }}
+          cache-key: ${{ matrix.platform.target }}
+          install-just: "false"
 
       - name: Build
         run: cargo build --release --target ${{ matrix.platform.target }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: bun-docs-mcp-proxy-${{ matrix.platform.target }}
+          path: target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy${{ runner.os == 'Windows' && '.exe' ||
+            '' }}
+          retention-days: 1

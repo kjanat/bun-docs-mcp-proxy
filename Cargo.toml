@@ -19,15 +19,36 @@ path = "src/bin/bun-docs-mcp-proxy.rs"
 [dependencies]
 anyhow             = "1"
 bytes              = "1"
-clap               = { version = "4.5", features = ["derive"] }
 eventsource-stream = "0.2"
 futures            = "0.3"
-reqwest            = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
-serde              = { version = "1", features = ["derive"] }
+# Needed for integration tests (integration-tests feature)
 serde_json         = "1.0"
-tokio              = { version = "1", default-features = false, features = ["io-std", "io-util", "macros", "rt-multi-thread", "time"] }
-tracing            = { version = "0.1", features = ["attributes"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dependencies.clap]
+version  = "4.5"
+features = ["derive"]
+
+[dependencies.reqwest]
+version          = "0.13"
+default-features = false
+features         = ["json", "rustls", "stream"]
+
+[dependencies.serde]
+version  = "1"
+features = ["derive"]
+
+[dependencies.tokio]
+version          = "1"
+default-features = false
+features         = ["io-std", "io-util", "macros", "rt-multi-thread", "time"]
+
+[dependencies.tracing]
+version  = "0.1"
+features = ["attributes"]
+
+[dependencies.tracing-subscriber]
+version  = "0.3"
+features = ["env-filter"]
 
 [dev-dependencies]
 assert_cmd = "2"
@@ -42,12 +63,9 @@ default           = []
 integration-tests = []
 
 [lints.clippy]
-# Restriction lints (cherry-picked, not whole group)
 alloc_instead_of_core             = "warn"
 allow_attributes_without_reason   = "warn"
 assertions_on_result_states       = "warn"
-# Lint groups (priority -1 allows individual overrides)
-cargo                             = { level = "warn", priority = -1 }
 clone_on_ref_ptr                  = "warn"
 dbg_macro                         = "warn"
 decimal_literal_representation    = "warn"
@@ -79,17 +97,14 @@ map_err_ignore                    = "warn"
 mem_forget                        = "warn"
 missing_assert_message            = "warn"
 missing_asserts_for_indexing      = "warn"
-# Pedantic overrides (too noisy/not useful for this crate)
 mixed_read_write_in_expression    = "warn"
 multiple_inherent_impl            = "warn"
 mutex_atomic                      = "warn"
 needless_raw_strings              = "warn"
-nursery                           = { level = "warn", priority = -1 }
 panic                             = "warn"
 panic_in_result_fn                = "warn"
 partial_pub_fields                = "warn"
 pathbuf_init_then_push            = "warn"
-pedantic                          = { level = "warn", priority = -1 }
 pub_without_shorthand             = "warn"
 rc_buffer                         = "warn"
 rc_mutex                          = "warn"
@@ -126,12 +141,29 @@ use_debug                         = "warn"
 verbose_file_reads                = "warn"
 wildcard_enum_match_arm           = "warn"
 
+[lints.clippy.cargo]
+level    = "warn"
+priority = -1
+
+[lints.clippy.nursery]
+level    = "warn"
+priority = -1
+
+[lints.clippy.pedantic]
+level    = "warn"
+priority = -1
+
 [lints.rust]
-let_underscore          = { level = "warn", priority = -1 }
-missing_docs            = "warn"
-rust_2024_compatibility = { level = "warn", priority = -1 }
-# Core Rust lints
-unsafe_code             = "deny"
+missing_docs = "warn"
+unsafe_code  = "deny"
+
+[lints.rust.let_underscore]
+level    = "warn"
+priority = -1
+
+[lints.rust.rust_2024_compatibility]
+level    = "warn"
+priority = -1
 
 [profile.release]
 opt-level     = "z"      # Optimize for size

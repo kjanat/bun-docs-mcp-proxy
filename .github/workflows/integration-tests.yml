@@ -1,55 +1,32 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
+---
 name: Integration Tests
-
 on:
-  # Run daily at 3 AM UTC
-  schedule:
-    - cron: "0 3 * * *"
-
-  # Allow manual trigger
-  workflow_dispatch:
+  schedule: [{ cron: "0 3 * * *" }] # Run daily at 3 AM UTC
+  workflow_dispatch: # Allow manual trigger
     inputs:
       verbose:
         description: "Enable verbose output"
         required: false
         default: false
         type: boolean
-
-env:
-  CARGO_TERM_COLOR: always
-
+env: { CARGO_TERM_COLOR: always, RUSTFLAGS: "-D warnings" }
 jobs:
   integration-tests:
     name: Integration Tests (Real API)
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    env:
-      RUSTFLAGS: -D warnings
-      RUST_LOG: ${{ github.event.inputs.verbose == 'true' && 'debug' || 'info' }}
-
+    permissions: { contents: read }
+    env: { RUST_LOG: "${{ github.event.inputs.verbose == 'true' && 'debug' || 'info' }}" }
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@nextest
-
-      - name: Run integration tests with real API
-        run: |
-          echo "::group::Running integration tests against bun.com/docs/mcp"
-          cargo test --features integration-tests --all-targets -- --include-ignored
-          echo "::endgroup::"
-        # Continue even if some tests fail (network issues, API changes, etc)
-        continue-on-error: true
+      - name: Rust setup
+        uses: ./.github/actions/rust-setup
+        with:
+          install-nextest: "true"
+          install-llvm-cov: "true"
+          install-just: "false"
 
       - name: Run integration tests with nextest
         run: |
@@ -68,18 +45,12 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         if: always()
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: integration-coverage.json
-          flags: integration
-          fail_ci_if_error: false
+        with: { files: integration-coverage.json, flags: integration, fail_ci_if_error: false }
 
       - name: Upload test results
-        uses: codecov/test-results-action@v1
+        uses: codecov/codecov-action@v5
         if: always()
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          flags: integration
+        with: { report_type: test_results, flags: integration, files: target/nextest/ci/junit.xml }
         continue-on-error: true
 
       - name: Summary

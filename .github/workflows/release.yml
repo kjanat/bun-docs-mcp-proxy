@@ -1,10 +1,25 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
+---
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  push: { tags: ["v*.*.*"] }
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g., v1.2.3)"
+        required: false
+        type: string
+      draft:
+        description: "Create as a draft"
+        required: false
+        default: false
+        type: boolean
+      prerelease:
+        description: "Mark as prerelease"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: release-${{ github.ref }}
@@ -12,67 +27,109 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
 
 jobs:
+  define-matrix:
+    name: Define Build Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      platforms: ${{ steps.matrix.outputs.platforms }}
+    steps:
+      - name: Build matrix JSON
+        id: matrix
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const arches = ["aarch64", "x86_64"] as const;
+            const libcs = ["gnu", "musl"] as const;
+
+            type Arch = typeof arches[number];
+            type Libc = typeof libcs[number];
+            type Fam = "macos" | "linux" | "windows";
+
+            const mk = (os: string, name: string, target: string, label: string) => {
+              const win = os[0] === "w";
+              return {
+                os,
+                name,
+                target,
+                label,
+                archive_ext: win ? "zip" : "tar.gz",
+                bin_ext: win ? ".exe" : "",
+                cross: os[0] === "u" && (target.includes("aarch64") || target.includes("musl")),
+              };
+            };
+
+            const label = (fam: Fam, arch: Arch, libc?: Libc) =>
+              fam === "macos"
+                ? (arch === "x86_64" ? "macOS Intel" : "macOS Apple Silicon")
+                : fam === "windows"
+                ? `Windows ${arch === "aarch64" ? "ARM64" : "x86_64"}`
+                : `Linux ${arch === "aarch64" ? "ARM64" : "x86_64"}${libc === "musl" ? " musl (static)" : ""}`;
+
+            const platforms = [
+              mk("macos-15-intel", "macos-x86_64", "x86_64-apple-darwin", label("macos", "x86_64")),
+              mk("macos-latest", "macos-aarch64", "aarch64-apple-darwin", label("macos", "aarch64")),
+
+              ...arches.flatMap(a =>
+                libcs.map(l =>
+                  mk("ubuntu-latest", `linux-${a}${l === "musl" ? "-musl" : ""}`, `${a}-unknown-linux-${l}`, label("linux", a, l))
+                )
+              ),
+
+              ...arches.map(a => mk("windows-latest", `windows-${a}`, `${a}-pc-windows-msvc`, label("windows", a))),
+            ];
+
+            core.info("Defined platforms:", JSON.stringify(platforms));
+            core.setOutput("platforms", JSON.stringify(platforms));
   lint:
     name: Pre-release Lint
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    env:
-      RUSTFLAGS: -D warnings
+    permissions: { contents: read }
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with: { ref: "${{ github.event.inputs.tag || github.ref }}" }
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install just
-        uses: extractions/setup-just@v3
+      - name: Rust setup
+        uses: ./.github/actions/rust-setup
+        with: { components: "rustfmt, clippy" }
 
       - name: Run lint checks
         run: just ci-lint
 
   build:
     name: Build ${{ matrix.platform.target }}
-    needs: lint
+    needs: [lint, define-matrix]
     runs-on: ${{ matrix.platform.os }}
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
+    permissions: { contents: read, id-token: write, attestations: write }
     env:
-      RUSTFLAGS: -D warnings
+      BIN_NAME: bun-docs-mcp-proxy
+      BIN_FILE: bun-docs-mcp-proxy${{ matrix.platform.bin_ext }}
+      BIN_DIR: target/${{ matrix.platform.target }}/release
+      ARCHIVE_NAME: bun-docs-mcp-proxy-${{ matrix.platform.name }}.${{ matrix.platform.archive_ext }}
+      ARCHIVE_PATH: |
+        target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.${{matrix.platform.archive_ext }}
+      TARGET: ${{ matrix.platform.target }}
+      CROSS: ${{ matrix.platform.cross }}
+      ARCHIVE_EXT: ${{ matrix.platform.archive_ext }}
     strategy:
       fail-fast: false
       matrix:
-        platform:
-          - { os: macos-15-intel, target: x86_64-apple-darwin, cross: false, name: macos-x86_64 }
-          - { os: macos-latest, target: aarch64-apple-darwin, cross: false, name: macos-aarch64 }
-          - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu, cross: true, name: linux-aarch64 }
-          - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, cross: true, name: linux-aarch64-musl }
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, cross: false, name: linux-x86_64 }
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, cross: true, name: linux-x86_64-musl }
-          - { os: windows-latest, target: aarch64-pc-windows-msvc, cross: false, name: windows-aarch64 }
-          - { os: windows-latest, target: x86_64-pc-windows-msvc, cross: false, name: windows-x86_64 }
-
+        platform: ${{ fromJSON(needs.define-matrix.outputs.platforms) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with: { targets: "${{ matrix.platform.target }}" }
-
-      - name: Cache
-        uses: Swatinem/rust-cache@v2
-        with: { key: "${{ matrix.platform.target }}" }
+      - name: Rust setup
+        uses: ./.github/actions/rust-setup
+        with:
+          targets: ${{ matrix.platform.target }}
+          cache-key: ${{ matrix.platform.target }}
+          install-just: "false"
 
       - name: Install Zig
         if: matrix.platform.cross
@@ -82,160 +139,53 @@ jobs:
         if: matrix.platform.cross
         uses: taiki-e/install-action@cargo-zigbuild
 
-      - name: Build with cargo-zigbuild
-        if: matrix.platform.cross
-        run: cargo zigbuild --release --target ${{ matrix.platform.target }}
-
-      - name: Build native
-        if: ${{ !matrix.platform.cross }}
-        run: cargo build --release --target ${{ matrix.platform.target }}
-
-      - name: Package (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Build
+        shell: bash
         run: |
-          cd target/${{ matrix.platform.target }}/release
-          tar czf bun-docs-mcp-proxy-${{ matrix.platform.name }}.tar.gz bun-docs-mcp-proxy
+          set -euo pipefail
+          if [[ "${CROSS}" == "true" ]]; then
+            cargo zigbuild --release --target "${TARGET}"
+          else
+            cargo build --release --target "${TARGET}"
+          fi
 
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
+      - name: Package
+        shell: bash
+        working-directory: ${{ env.BIN_DIR }}
         run: |
-          cd target/${{ matrix.platform.target }}/release
-          7z a bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip bun-docs-mcp-proxy.exe
+          if [[ "${ARCHIVE_EXT}" == "zip" ]]; then
+            7z a "${ARCHIVE_NAME}" "${BIN_FILE}"
+          else
+            tar czf "${ARCHIVE_NAME}" "${BIN_FILE}"
+          fi
 
-      - name: Generate attestation (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Generate attestation
         uses: actions/attest-build-provenance@v3
-        with:
-          subject-path: "target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.tar.gz"
+        with: { subject-path: "${{ env.ARCHIVE_PATH }}" }
 
-      - name: Generate attestation (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/attest-build-provenance@v3
-        with:
-          subject-path: "target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip"
-
-      - name: Upload artifact (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
-          name: bun-docs-mcp-proxy-${{ matrix.platform.name }}
-          path: target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.tar.gz
-
-      - name: Upload artifact (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v6
-        with:
-          name: bun-docs-mcp-proxy-${{ matrix.platform.name }}
-          path: target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy-${{ matrix.platform.name }}.zip
+          { name: "bun-docs-mcp-proxy-${{ matrix.platform.name }}", path: "${{ env.ARCHIVE_PATH }}" }
 
   release:
     name: Create Release
-    needs: build
+    needs: [build, define-matrix]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    permissions:
-      contents: write
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '')
+    permissions: { contents: write }
+    env:
+      REF: "${{ github.event.inputs.tag || github.ref }}"
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v7
-        with: { path: artifacts }
-
-      - name: Generate checksums
-        run: |
-          cd artifacts
-          # Generate SHA256SUMS file
-          find . -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec sha256sum {} \; | sed 's|./[^/]*/||' > SHA256SUMS
-          cat SHA256SUMS
+        with: { ref: "${{ env.REF }}" }
 
       - name: Create Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Extract version from tag
-          VERSION=${GITHUB_REF#refs/tags/}
-
-          # Create release notes with embedded checksums
-          cat > release_notes.md << 'EOF'
-          ## Bun Docs MCP Proxy ${{ github.ref_name }}
-
-          ### Installation
-
-          Download the binary for your platform below, extract it, and make it executable (Linux/macOS).
-
-          #### Linux/macOS
-          ```bash
-          # Download and extract (adjust URL for your platform)
-          curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/bun-docs-mcp-proxy-linux-x86_64.tar.gz | tar xz
-
-          # Make executable
-          chmod +x bun-docs-mcp-proxy
-
-          # Move to PATH (optional)
-          sudo mv bun-docs-mcp-proxy /usr/local/bin/
-          ```
-
-          #### Windows
-          Download the `.zip` file, extract it, and add to your PATH.
-
-          ### Platforms
-
-          - **Linux x86_64**: `bun-docs-mcp-proxy-linux-x86_64.tar.gz`
-          - **Linux ARM64**: `bun-docs-mcp-proxy-linux-aarch64.tar.gz`
-          - **Linux x86_64 musl** (static): `bun-docs-mcp-proxy-linux-x86_64-musl.tar.gz`
-          - **Linux ARM64 musl** (static): `bun-docs-mcp-proxy-linux-aarch64-musl.tar.gz`
-          - **macOS Intel**: `bun-docs-mcp-proxy-macos-x86_64.tar.gz`
-          - **macOS Apple Silicon**: `bun-docs-mcp-proxy-macos-aarch64.tar.gz`
-          - **Windows x86_64**: `bun-docs-mcp-proxy-windows-x86_64.zip`
-          - **Windows ARM64**: `bun-docs-mcp-proxy-windows-aarch64.zip`
-
-          ### Verification
-
-          #### Automated Verification (Recommended)
-
-          All binaries are signed with GitHub's attestation system for supply chain security:
-
-          ```bash
-          # Install GitHub CLI if needed
-          # gh --version
-
-          # Verify attestation (replace with your platform's filename)
-          gh attestation verify bun-docs-mcp-proxy-linux-x86_64.tar.gz --owner kjanat
-          ```
-
-          #### Manual Verification
-
-          Download `SHA256SUMS` and verify checksums:
-
-          ```bash
-          # Linux/macOS
-          sha256sum -c SHA256SUMS
-
-          # Or verify single file
-          sha256sum bun-docs-mcp-proxy-linux-x86_64.tar.gz
-
-          # Windows (PowerShell)
-          Get-FileHash bun-docs-mcp-proxy-windows-x86_64.zip -Algorithm SHA256
-          ```
-
-          #### SHA256 Checksums
-
-          ```
-          EOF
-
-          # Append checksums to release notes
-          cat artifacts/SHA256SUMS >> release_notes.md
-
-          cat >> release_notes.md << 'EOF'
-          ```
-          EOF
-
-          # Create release
-          gh release create "${VERSION}" \
-            --title "Release ${VERSION}" \
-            --notes-file release_notes.md \
-            artifacts/*/*.tar.gz \
-            artifacts/*/*.zip \
-            artifacts/SHA256SUMS
+        uses: ./.github/actions/create-release
+        with:
+          tag: "${{ env.REF }}"
+          draft: ${{ github.event.inputs.draft }}
+          prerelease: ${{ github.event.inputs.prerelease }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          matrix_json: ${{ needs.define-matrix.outputs.platforms }}

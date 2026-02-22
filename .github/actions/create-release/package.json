@@ -1,0 +1,17 @@
+{
+  "name": "create-release",
+  "type": "module",
+  "module": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/bun": "catalog:",
+    "@actions/io": "catalog:",
+    "actions-toolkit": "catalog:"
+  },
+  "peerDependencies": {
+    "typescript": "catalog:"
+  }
+}
