@@ -15,16 +15,20 @@
 //! - For 429: uses `Retry-After` header if present, else exponential backoff.
 //! - For 5xx/network: exponential backoff (200 ms -> 400 ms -> 800 ms, capped at 1 s).
 
-use crate::mcp::{JsonRpcEnvelope, content_type};
-use crate::util::truncate_utf8;
+use std::time::Duration;
+
 use anyhow::{Context as _, Result};
 use bytes::{Bytes, BytesMut};
 use eventsource_stream::Eventsource as _;
 use futures::StreamExt as _;
 use reqwest::{Client, StatusCode, Url, header::HeaderMap};
 use serde_json::Value;
-use std::time::Duration;
 use tracing::{Span, debug, info, instrument, warn};
+
+use crate::{
+    mcp::{JsonRpcEnvelope, content_type},
+    util::truncate_utf8,
+};
 
 /// Base URL for the Bun documentation API
 const BUN_DOCS_API: &str = "https://bun.com/docs/mcp";
@@ -777,9 +781,11 @@ impl BunDocsClient {
 #[allow(clippy::indexing_slicing, reason = "tests use array indexing")]
 #[allow(clippy::default_numeric_fallback, reason = "test literals")]
 mod tests {
-    use super::*;
-    use serde_json::json;
     use std::time::Instant;
+
+    use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn client_creation() {
@@ -1788,8 +1794,9 @@ mod tests {
 
     #[cfg(feature = "integration-tests")]
     mod edge_cases {
-        use super::*;
         use std::io::{Error, ErrorKind::Other};
+
+        use super::*;
 
         #[tokio::test]
         async fn forward_request_connection_refused() {

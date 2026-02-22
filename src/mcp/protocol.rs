@@ -315,8 +315,9 @@ impl JsonRpcResponse {
 #[allow(clippy::indexing_slicing, reason = "tests use array indexing")]
 #[allow(clippy::default_numeric_fallback, reason = "test literals")]
 mod tests {
-    use super::*;
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn deserialize_jsonrpc_request() {

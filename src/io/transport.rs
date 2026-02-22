@@ -8,10 +8,11 @@
 //!
 //! Logging goes to stderr so stdout remains clean JSON-RPC.
 
-use crate::util::truncate_utf8;
 use anyhow::{Context as _, Result};
 use tokio::io::{AsyncBufReadExt as _, AsyncRead, AsyncWrite, AsyncWriteExt as _, BufReader};
 use tracing::debug;
+
+use crate::util::truncate_utf8;
 
 /// The maximum length of messages (in bytes) to display in debug logs.
 /// Messages longer than this will be truncated for readability.
@@ -154,8 +155,9 @@ impl Default for StdioTransport {
 #[allow(clippy::expect_used, reason = "tests can use expect()")]
 #[allow(clippy::unwrap_used, reason = "tests can use unwrap()")]
 mod tests {
-    use super::*;
     use std::io::Cursor;
+
+    use super::*;
 
     /// Helper type for in-memory transport testing.
     type TestTransport = Transport<Cursor<Vec<u8>>, Vec<u8>>;

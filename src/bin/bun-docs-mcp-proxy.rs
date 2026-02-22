@@ -12,6 +12,8 @@
 //!
 //! Upstream transport: HTTP POST returning JSON or SSE; downstream transport: stdio JSON-RPC.
 
+use std::fs;
+
 use anyhow::Result;
 use bun_docs_mcp_proxy::{
     BunDocsClient, UpstreamResponse,
@@ -19,7 +21,6 @@ use bun_docs_mcp_proxy::{
     run_mcp_server,
 };
 use clap::{Parser, ValueEnum};
-use std::fs;
 use tracing::instrument;
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 
@@ -74,6 +75,26 @@ struct Cli {
     /// Output format
     #[arg(short, long, value_enum, default_value_t = OutputFormat::Json)]
     format: OutputFormat,
+}
+
+/// Resets `SIGPIPE` to default behavior on Unix.
+///
+/// Rust ignores `SIGPIPE` by default, turning broken-pipe writes into `EPIPE` errors.
+/// When the parent process (e.g., Zed) closes our stderr pipe, `eprintln!` and
+/// tracing writes panic on `EPIPE`, which with `panic = "abort"` produces `SIGABRT`
+/// coredumps. Restoring `SIG_DFL` makes the kernel terminate the process cleanly
+/// on broken pipe (signal 13, exit code 141) — no panic, no abort, no coredump.
+#[cfg(unix)]
+#[allow(
+    unsafe_code,
+    reason = "reset SIGPIPE to prevent coredumps when parent closes stderr pipe"
+)]
+fn reset_sigpipe() {
+    // SAFETY: Restoring SIGPIPE to its default handler (SIG_DFL) is safe.
+    // This is the standard Unix behavior before Rust overrides it.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
 }
 
 /// Initializes the `tracing` subscriber for logging.
@@ -194,6 +215,9 @@ async fn direct_search(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    #[cfg(unix)]
+    reset_sigpipe();
+
     let cli = Cli::parse();
     init_logging();
 
@@ -213,9 +237,10 @@ mod tests {
     #![allow(clippy::indexing_slicing, reason = "tests use array indexing")]
     #![allow(clippy::default_numeric_fallback, reason = "test literals")]
 
-    use super::*;
     use bun_docs_mcp_proxy::{JsonRpcRequest, JsonRpcResponse, error_code};
     use serde_json::json;
+
+    use super::*;
 
     // ============================================================================
     // JSON-RPC Protocol Tests (basic parsing)
@@ -503,8 +528,9 @@ mod tests {
             reason = "cargo_bin_cmd! macro unavailable in inline tests"
         )]
 
-        use assert_cmd::Command;
         use core::time::Duration;
+
+        use assert_cmd::Command;
         use predicates::prelude::*;
 
         #[test]
@@ -616,12 +642,13 @@ mod tests {
             reason = "cargo_bin_cmd! macro unavailable in inline tests"
         )]
 
-        use assert_cmd::Command;
-        use predicates::prelude::*;
         #[cfg(feature = "integration-tests")]
         use std::fs;
         #[cfg(feature = "integration-tests")]
         use std::path::Path;
+
+        use assert_cmd::Command;
+        use predicates::prelude::*;
 
         /// Test basic search functionality in CLI mode
         #[test]

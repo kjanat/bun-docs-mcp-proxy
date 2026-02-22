@@ -3,12 +3,15 @@
 //! This module contains all the JSON-RPC method handlers for the MCP protocol,
 //! including `initialize`, `tools/list`, `tools/call`, `resources/list`, and `resources/read`.
 
-use crate::mcp::{
-    BUN_URI_HOST, BUN_URI_SCHEME, JsonRpcRequest, JsonRpcResponse, MCP_PROTOCOL_VERSION,
-    SERVER_NAME, content_type, error_code,
-};
-use crate::upstream::{BunDocsClient, UpstreamResponse};
 use tracing::{error, info, instrument};
+
+use crate::{
+    mcp::{
+        BUN_URI_HOST, BUN_URI_SCHEME, JsonRpcRequest, JsonRpcResponse, MCP_PROTOCOL_VERSION,
+        SERVER_NAME, content_type, error_code,
+    },
+    upstream::{BunDocsClient, UpstreamResponse},
+};
 
 // ============================================================================
 // Helper Functions
@@ -415,10 +418,13 @@ pub async fn handle_resources_read(
 #[allow(clippy::indexing_slicing, reason = "tests use array indexing")]
 #[allow(clippy::default_numeric_fallback, reason = "test literals")]
 mod tests {
-    use super::*;
-    use crate::mcp::{JsonRpcRequest, MCP_PROTOCOL_VERSION, SERVER_NAME};
-    use crate::upstream::bun_docs as http;
     use serde_json::json;
+
+    use super::*;
+    use crate::{
+        mcp::{JsonRpcRequest, MCP_PROTOCOL_VERSION, SERVER_NAME},
+        upstream::bun_docs as http,
+    };
 
     #[test]
     fn test_handle_initialize() {

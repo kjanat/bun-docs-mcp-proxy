@@ -5,15 +5,18 @@
 
 pub mod handlers;
 
-use crate::io::transport::StdioTransport;
-use crate::mcp::{JsonRpcRequest, JsonRpcResponse, Method, error_code};
-use crate::upstream::BunDocsClient;
-use crate::util::truncate_for_log;
 use handlers::{
     handle_initialize, handle_resources_list, handle_resources_read, handle_tools_call,
     handle_tools_list,
 };
 use tracing::{Instrument as _, debug, error, info, info_span};
+
+use crate::{
+    io::transport::StdioTransport,
+    mcp::{JsonRpcRequest, JsonRpcResponse, Method, error_code},
+    upstream::BunDocsClient,
+    util::truncate_for_log,
+};
 
 /// Runs the MCP JSON-RPC server loop over stdio.
 ///
@@ -172,8 +175,9 @@ pub async fn run_mcp_server() -> anyhow::Result<()> {
 #[allow(clippy::unwrap_used, reason = "tests can use unwrap()")]
 #[allow(deprecated, reason = "cargo_bin is simpler for lib tests")]
 mod tests {
-    use assert_cmd::Command;
     use core::time::Duration;
+
+    use assert_cmd::Command;
     use predicates::prelude::*;
 
     #[test]

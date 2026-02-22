@@ -6,13 +6,12 @@
 pub mod protocol;
 
 // Re-export protocol types for convenience
+use core::{fmt, str::FromStr};
+
 #[allow(unused_imports, reason = "re-exports for public API consistency")]
 pub use protocol::{
     JsonRpcEnvelope, JsonRpcError, JsonRpcErrorObject, JsonRpcRequest, JsonRpcResponse,
 };
-
-use core::fmt;
-use core::str::FromStr;
 
 // ============================================================================
 // JSON-RPC Method Names

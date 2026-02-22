@@ -1,11 +1,11 @@
 //! Markdown output formatter with MDX fetching.
 
-use super::extract_doc_entries;
-use crate::upstream::bun_docs::BunDocsClient;
 use anyhow::Result;
-
 use futures::stream::{self, StreamExt as _};
 use tracing::warn;
+
+use super::extract_doc_entries;
+use crate::upstream::bun_docs::BunDocsClient;
 
 /// Maximum number of concurrent MDX fetch requests.
 const MAX_CONCURRENT_FETCHES: usize = 4;
@@ -81,8 +81,9 @@ pub async fn format_markdown(result: &serde_json::Value, client: &BunDocsClient)
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, reason = "test code")]
 
-    use super::*;
     use serde_json::json;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_format_markdown_no_url() {

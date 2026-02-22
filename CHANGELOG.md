@@ -62,6 +62,9 @@ DO NOT REMOVE THIS COMMENT!
 
 ### Fixed
 
+- SIGABRT coredumps when parent process (Zed) closes stderr pipe — reset SIGPIPE
+  to SIG_DFL so broken-pipe writes terminate cleanly (exit 141) instead of
+  panicking through `eprintln!`/tracing with `panic = "abort"`
 - `AGENTS.md` module structure to match actual v1.0 layout
 - Documentation links to deleted files (`INDEX.md`, `TESTING.md`)
 - `CLAUDE.md` -> `AGENTS.md` references in templates

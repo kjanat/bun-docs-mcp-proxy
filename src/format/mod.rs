@@ -80,8 +80,9 @@ pub fn extract_doc_entries(result: &serde_json::Value) -> Vec<DocEntry<'_>> {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::indexing_slicing, reason = "test code")]
 
-    use super::*;
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn test_extract_doc_entries_with_url() {
