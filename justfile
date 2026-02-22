@@ -144,12 +144,14 @@ coverage-nextest:
 
 # Format code
 [group('lint')]
-fmt *args:
-    cargo fmt {{ args }}
+fmt:
+    dprint fmt
+    cargo +nightly fmt
 
 # Check code formatting
 [group('lint')]
 fmt-check:
+    dprint check
     cargo fmt --check --message-format short
 
 # Run clippy linter with all features
