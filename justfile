@@ -69,6 +69,11 @@ clean:
 update *args:
     cargo update {{ args }}
 
+# Install release binary to Cargo bin directory
+[group('build')]
+install:
+    cargo install --bin {{ binary_name }} --path .
+
 # ===== Test Tasks =====
 
 # Run all tests (unit tests only by default, no network calls)

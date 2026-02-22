@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- `just install` recipe for installing the binary to `~/.cargo/bin`.
+
 ### Fixed
 
 - CI lint jobs missing `dprint` and `tombi` formatters — added
