@@ -152,7 +152,7 @@ fmt:
 [group('lint')]
 fmt-check:
     dprint check
-    cargo fmt --check --message-format short
+    cargo +nightly fmt --check --message-format short
 
 # Run clippy linter with all features
 [group('lint')]

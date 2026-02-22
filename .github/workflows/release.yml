@@ -86,6 +86,7 @@ jobs:
             exit 1
           fi
 
+      - run: rustup toolchain install nightly --component rustfmt
       - uses: oven-sh/setup-bun@v2
       - run: bun i -g dprint tombi
 
