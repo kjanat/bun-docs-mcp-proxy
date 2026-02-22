@@ -21,6 +21,24 @@ The format is based on [Keep a Changelog], and this project adheres to
 - `workflow_dispatch` inputs (tag, draft, prerelease) for release workflow
 - Build artifact uploads in CI workflow
 - `pull_request` trigger for Claude code review (merged into `claude.yml`)
+- `cargo deny check` step in CI lint job (via `taiki-e/install-action`)
+- Tag↔`Cargo.toml` version validation step in release lint job
+- `npm` ecosystem entry in `dependabot.yml` for `.github/actions`
+- `deny` recipe to justfile `ci-lint`
+
+### Fixed
+
+- `release.yml` `github-script` used TypeScript syntax (`as const`, typed
+  params) but `actions/github-script` runs plain JavaScript — caused
+  `SyntaxError` at runtime
+- `create-release` composite action missing `INPUT_*` env var mapping —
+  `core.getInput()` silently returned empty strings for all inputs
+- Partial releases on asset upload failure — now creates release as draft first,
+  uploads all assets, then un-drafts
+- Unsafe `as GitHubClient` type cast replaced with `Toolkit["github"]` and
+  runtime `isArtifact` type guard
+- `pages.yml` `pages: write` and `id-token: write` permissions scoped to deploy
+  job only (were workflow-level)
 
 ### Changed
 
@@ -52,8 +70,9 @@ The format is based on [Keep a Changelog], and this project adheres to
 - `CLAUDE.md` is now a symlink to `AGENTS.md`
 - Moved JS/TS tooling to `tools/` directory (was root + `scripts/`)
 - Expanded `bacon.toml` with project-specific jobs and keybindings
-- Updated `SECURITY.md` supported versions (1.x supported, <1.0.0 unsupported)
+- Updated `SECURITY.md` supported versions (2.x supported, 1.x security-only)
 - Updated `CONTRIBUTING.md` Rust version requirement (1.85.0+, edition 2024)
+- Release artifact upload uses `retention-days: 1`
 - Bump 68 dependencies (`cargo update`)
 
 ### Removed
@@ -67,6 +86,8 @@ The format is based on [Keep a Changelog], and this project adheres to
 - `macos-15-intel` (x86_64-apple-darwin) from CI build matrix
 - `jq` as a CI test dependency
 - Redundant standalone `cargo test` run in `integration-tests.yml`
+- Empty `index.test.ts` in `create-release` action
+- `enshittify.ts` from version control (gitignored)
 
 ### Fixed
 
