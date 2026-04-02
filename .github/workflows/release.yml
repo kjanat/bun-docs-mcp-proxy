@@ -154,11 +154,11 @@ jobs:
           fi
 
       - name: Generate attestation
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with: { subject-path: "${{ env.ARCHIVE_PATH }}" }
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           { name: "bun-docs-mcp-proxy-${{ matrix.platform.name }}", path: "${{ env.ARCHIVE_PATH }}", retention-days: 1 }
 

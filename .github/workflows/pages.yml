@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/rust-setup
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
       - run: just doc-pages
       - uses: actions/upload-pages-artifact@v4
         with: { path: ./target/doc }
@@ -39,4 +39,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
