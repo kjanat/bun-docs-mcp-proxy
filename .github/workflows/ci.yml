@@ -44,7 +44,7 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: ./.github/actions/rust-setup
         with: { install-nextest: "true", install-llvm-cov: "true" }
@@ -52,19 +52,19 @@ jobs:
       - run: just ci-coverage
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with: { files: codecov.json, fail_ci_if_error: true }
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with: { report_type: test_results, files: target/nextest/ci/junit.xml }
 
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/rust-setup
         with: { components: "rustfmt, clippy" }
       - run: rustup toolchain install nightly --component rustfmt
@@ -87,7 +87,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Rust setup
         uses: ./.github/actions/rust-setup
