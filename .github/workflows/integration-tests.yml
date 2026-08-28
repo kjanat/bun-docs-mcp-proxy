@@ -13,7 +13,7 @@ jobs:
     permissions: { contents: read }
     env: { RUST_LOG: "${{ github.event.inputs.verbose == 'true' && 'debug' || 'info' }}" }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: ./.github/actions/rust-setup
         with: { install-nextest: "true", install-llvm-cov: "true", install-just: "false" }
@@ -33,12 +33,12 @@ jobs:
         continue-on-error: true
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         if: always()
         with: { files: integration-coverage.json, flags: integration, fail_ci_if_error: false }
 
       - name: Upload test results
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         if: always()
         with: { report_type: test_results, flags: integration, files: target/nextest/ci/junit.xml }
         continue-on-error: true

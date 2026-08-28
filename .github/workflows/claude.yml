@@ -25,7 +25,7 @@ jobs:
     permissions:
       { contents: read, pull-requests: read, issues: read, id-token: write, actions: read }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
       - uses: oven-sh/setup-bun@v2
       - name: Install tools
@@ -68,7 +68,7 @@ jobs:
       { contents: read, pull-requests: read, issues: read, id-token: write }
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
       - uses: oven-sh/setup-bun@v2
       - name: Install tools
