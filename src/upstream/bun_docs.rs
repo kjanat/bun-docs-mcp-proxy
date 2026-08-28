@@ -827,10 +827,7 @@ mod tests {
             client.backoff_delay(3_usize),
             Duration::from_millis(800_u64)
         );
-        assert_eq!(
-            client.backoff_delay(4_usize),
-            Duration::from_millis(1000_u64)
-        ); // capped
+        assert_eq!(client.backoff_delay(4_usize), Duration::from_secs(1_u64)); // capped
     }
 
     #[test]

@@ -14,8 +14,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 ### Fixed
 
 - CI lint jobs missing `dprint` and `tombi` formatters — added
-  `bun i -g dprint
-  tombi` (mirrors `autofix.yml`)
+  `bun i -g dprint tombi` (mirrors `autofix.yml`)
 - `fmt-check` recipe used stable `cargo fmt` but `rustfmt.toml` requires
   nightly-only options (`imports_granularity`, `group_imports`) — now uses
   `cargo +nightly fmt`; CI installs nightly toolchain

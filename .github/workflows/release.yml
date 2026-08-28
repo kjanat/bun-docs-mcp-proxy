@@ -75,7 +75,7 @@ jobs:
         with: { ref: "${{ github.event.inputs.tag || github.ref }}" }
 
       - name: Rust setup
-        uses: ./.github/actions/rust-setup
+        uses: $/.github/actions/rust-setup
         with: { components: "rustfmt, clippy" }
 
       - name: Verify version matches tag
@@ -84,8 +84,8 @@ jobs:
           REF="${{ github.event.inputs.tag || github.ref }}"
           TAG_VERSION="${REF#refs/tags/}"
           TAG_VERSION="${TAG_VERSION#v}"
-          if [[ "$CARGO_VERSION" != "$TAG_VERSION" ]]; then
-            echo "::error::Cargo.toml version ($CARGO_VERSION) does not match tag ($TAG_VERSION)"
+          if [[ "${CARGO_VERSION}" != "${TAG_VERSION}" ]]; then
+            echo "::error::Cargo.toml version (${CARGO_VERSION}) does not match tag (${TAG_VERSION})"
             exit 1
           fi
 
@@ -121,7 +121,7 @@ jobs:
         with: { ref: "${{ github.event.inputs.tag || github.ref }}" }
 
       - name: Rust setup
-        uses: ./.github/actions/rust-setup
+        uses: $/.github/actions/rust-setup
         with:
           targets: ${{ matrix.platform.target }}
           cache-key: ${{ matrix.platform.target }}

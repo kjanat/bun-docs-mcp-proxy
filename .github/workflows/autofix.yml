@@ -1,21 +1,24 @@
 # yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
 ---
 name: autofix.ci
-on: { pull_request: {}, push: { branches: ["master"] } }
+on: { pull_request: null, push: { branches: [master] } }
 permissions: { contents: read }
 jobs:
   autofix:
     runs-on: ubuntu-latest
+    if: github.event.pull_request.stack == null
     steps:
-      - { uses: actions/checkout@v7 }
-      - { uses: oven-sh/setup-bun@v2 }
-      - { uses: ./.github/actions/rust-setup, with: { install-just: "false" } }
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - uses: kjanat/install-dprint@v2
+      - uses: $/.github/actions/rust-setup
+        with: { install-just: "false" }
 
       - name: Install formatters
-        run: bun i -g dprint tombi --trust
+        run: bun i -g tombi --trust
 
       - name: Format all files
-        run: dprint fmt --allow-no-files --excludes ".github"
+        run: dprint fmt --allow-no-files --excludes .github
         continue-on-error: true
 
       - name: Fix clippy warnings

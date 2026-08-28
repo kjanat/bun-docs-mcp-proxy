@@ -30,8 +30,9 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Install tools
         run: |
-          bun i -g lefthook dprint tombi --trust
-          lefthook install
+          bun i -g dprint tombi --trust
+          pipx install pre-commit==4.6.2
+          pre-commit install --install-hooks --hook-type pre-commit --hook-type pre-push
 
       - name: Run Claude Code
         id: claude
@@ -74,8 +75,9 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Install tools
         run: |
-          bun i -g lefthook dprint tombi --trust
-          lefthook install
+          bun i -g dprint tombi --trust
+          pipx install pre-commit==4.6.2
+          pre-commit install --install-hooks --hook-type pre-commit --hook-type pre-push
 
       - name: Run Claude Code Review
         id: claude-review

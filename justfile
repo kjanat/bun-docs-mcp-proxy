@@ -141,7 +141,7 @@ coverage-nextest:
     source <(cargo llvm-cov show-env --export-prefix)
     cargo llvm-cov clean --workspace
     cargo build --all-features
-    cargo nextest run --all-features --workspace --no-fail-fast --profile ci
+    cargo nextest run --workspace --no-fail-fast --profile ci
     cargo llvm-cov report --codecov --output-path codecov.json
     echo "Coverage report -> codecov.json"
     echo "JUnit report -> target/nextest/ci/junit.xml"

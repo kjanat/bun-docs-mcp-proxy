@@ -33,7 +33,7 @@ runs:
     - uses: oven-sh/setup-bun@v2
     - shell: bash
       id: install_deps
-      run: bun --cwd="${{ github.action_path }}" i --frozen-lockfile
+      run: bun --cwd="${GITHUB_ACTION_PATH}" i --frozen-lockfile
     - shell: bash
       id: create_release
       env:
@@ -42,4 +42,4 @@ runs:
         INPUT_PRERELEASE: ${{ inputs.prerelease }}
         INPUT_GITHUB_TOKEN: ${{ inputs.github_token }}
         INPUT_MATRIX_JSON: ${{ inputs.matrix_json }}
-      run: bun --cwd="${{ github.action_path }}" --bun src/index.ts
+      run: bun --cwd="${GITHUB_ACTION_PATH}" --bun src/index.ts

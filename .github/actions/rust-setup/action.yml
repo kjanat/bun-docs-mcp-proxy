@@ -51,7 +51,7 @@ runs:
 
     - name: Install just
       if: ${{ inputs.install-just == 'true' }}
-      uses: extractions/setup-just@v3
+      uses: extractions/setup-just@v4
 
     - name: Install cargo-nextest
       if: ${{ inputs.install-nextest == 'true' }}

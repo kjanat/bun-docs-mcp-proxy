@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: ./.github/actions/rust-setup
+      - uses: $/.github/actions/rust-setup
         with: { install-nextest: "true", install-llvm-cov: "true", install-just: "false" }
 
       - name: Run integration tests with nextest
@@ -53,4 +53,4 @@ jobs:
             echo "Note: Failures may be due to network issues or API changes."
             echo ""
             echo "To run locally: \`cargo test --features integration-tests\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          } >> "${GITHUB_STEP_SUMMARY}"
