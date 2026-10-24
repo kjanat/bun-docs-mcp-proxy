@@ -1,23 +1,21 @@
 {
-  "name": "actions",
+  "name": "bun-docs",
   "private": true,
   "type": "module",
   "workspaces": [
-    "create-release"
+    ".github/actions/create-release"
   ],
   "packageManager": "bun@1.4.0",
   "volta": {
     "node": "24.13.0"
   },
   "scripts": {
-    "build": "bun --filter '*' build",
     "typecheck": "bun --filter '*' typecheck"
   },
   "catalog": {
     "actions-toolkit": "^6.0.1",
     "@actions/io": "^3.0.2",
     "typescript": "^7.0.2",
-    "@types/node": ">=24.13.3",
-    "@types/bun": "^1.4.0"
+    "@types/node": ">=24.13.3"
   }
 }
