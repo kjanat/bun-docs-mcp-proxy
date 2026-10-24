@@ -2,7 +2,7 @@
 # Converted from Taskfile.yml
 # Variables
 
-binary_name := "bun-docs-mcp-proxy"
+binary_name := "bun-docs"
 build_dir := "target/release"
 coverage_dir := "target/llvm-cov/html"
 doc_dir := "target/doc"
@@ -176,12 +176,12 @@ check: fmt-check clippy test
 
 # ===== Run Tasks =====
 
-# Run proxy in debug mode (MCP server)
+# Run in debug mode (MCP server)
 [group('run')]
 run *args:
     RUST_LOG=debug cargo run -- {{ args }}
 
-# Run proxy in release mode
+# Run in release mode
 [group('run')]
 run-release: build-release
     RUST_LOG=info {{ build_dir }}/{{ binary_name }}
@@ -191,43 +191,33 @@ run-release: build-release
 # Search Bun docs (usage: just search "Bun.serve")
 [group('search')]
 search query:
-    cargo run -- --search "{{ query }}" | jq -r '.[]?[1]?.text'
+    cargo run -- --search "{{ query }}" --format text
 
 # Search using release binary
 [group('search')]
 search-release query: build-release
-    {{ build_dir }}/{{ binary_name }} --search "{{ query }}" | jq -r '.[]?[1]?.text'
+    {{ build_dir }}/{{ binary_name }} --search "{{ query }}" --format text
 
 # ===== Manual MCP Protocol Tests =====
 
-# Test MCP initialize method
+# Test MCP server discovery
 [group('mcp-test')]
-test-mcp-init: build-release
-    echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | {{ build_dir }}/{{ binary_name }}
+test-mcp-discover: build-release
+    echo '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' | {{ build_dir }}/{{ binary_name }}
 
 # Test MCP tools/list method
 [group('mcp-test')]
 test-mcp-tools-list: build-release
-    echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | {{ build_dir }}/{{ binary_name }}
+    echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' | {{ build_dir }}/{{ binary_name }}
 
 # Test MCP tools/call method
 [group('mcp-test')]
 test-mcp-tools-call: build-release
-    echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"SearchBun","arguments":{"query":"Bun.serve"}}}' | {{ build_dir }}/{{ binary_name }}
-
-# Test MCP resources/list method
-[group('mcp-test')]
-test-mcp-resources-list: build-release
-    echo '{"jsonrpc":"2.0","id":1,"method":"resources/list"}' | {{ build_dir }}/{{ binary_name }}
-
-# Test MCP resources/read method
-[group('mcp-test')]
-test-mcp-resources-read: build-release
-    echo '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"bun://docs?query=Bun.serve"}}' | {{ build_dir }}/{{ binary_name }}
+    echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_bun","arguments":{"query":"Bun.serve"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' | {{ build_dir }}/{{ binary_name }}
 
 # Run all manual MCP protocol tests
 [group('mcp-test')]
-test-mcp-all: test-mcp-init test-mcp-tools-list test-mcp-tools-call test-mcp-resources-list test-mcp-resources-read
+test-mcp-all: test-mcp-discover test-mcp-tools-list test-mcp-tools-call
 
 # ===== Cross-Platform Builds (Native) =====
 

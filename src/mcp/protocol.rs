@@ -22,7 +22,7 @@
 //!
 //! ```rust
 //! use serde_json::json;
-//! # use bun_docs_mcp_proxy::mcp::protocol::JsonRpcResponse;
+//! # use bun_docs::mcp::protocol::JsonRpcResponse;
 //!
 //! // Success response
 //! let response = JsonRpcResponse::success(json!(1), json!({"result": "data"}));
@@ -341,12 +341,12 @@ mod tests {
         let json_str = r#"{
             "jsonrpc": "2.0",
             "id": "test-id",
-            "method": "initialize"
+            "method": "server/discover"
         }"#;
 
         let request: JsonRpcRequest =
             serde_json::from_str(json_str).expect("valid JSON-RPC request should parse");
-        assert_eq!(request.method, "initialize");
+        assert_eq!(request.method, "server/discover");
         assert!(request.params.is_none());
     }
 
@@ -355,14 +355,14 @@ mod tests {
         // JSON-RPC 2.0 notifications have no id field
         let json_str = r#"{
             "jsonrpc": "2.0",
-            "method": "notifications/initialized"
+            "method": "notifications/cancelled"
         }"#;
 
         let request: JsonRpcRequest =
             serde_json::from_str(json_str).expect("valid JSON-RPC notification should parse");
         assert_eq!(request.jsonrpc, Some("2.0".to_owned()));
         assert!(request.id.is_none(), "notifications should have no id");
-        assert_eq!(request.method, "notifications/initialized");
+        assert_eq!(request.method, "notifications/cancelled");
         assert!(request.params.is_none());
     }
 

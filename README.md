@@ -1,11 +1,13 @@
-# Bun Docs MCP Proxy
+# Bun Docs MCP
 
 [![CI](https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/ci.yml/badge.svg?branch=master)][ci.yml]
 [![Release](https://github.com/kjanat/bun-docs-mcp-proxy/actions/workflows/release.yml/badge.svg)][release.yml]
 [![codecov](https://codecov.io/gh/kjanat/bun-docs-mcp-proxy/graph/badge.svg?token=ySY6HF2Vbx)][codecov]
 
-MCP proxy for Bun documentation. Works with Zed, Claude Code, or as a standalone
-CLI.
+Local full-text search for Bun documentation. The binary downloads Bun's static
+`llms.txt` and `llms-full.txt` assets, builds an in-memory Tantivy index, and
+serves it to Zed, Claude Code, or the standalone CLI. It does not call Bun's
+hosted MCP endpoint.
 
 ## Install
 
@@ -23,12 +25,28 @@ variants for Linux.
 ### CLI
 
 ```bash
-bun-docs-mcp-proxy -s "Bun.serve"                       # JSON output
-bun-docs-mcp-proxy -s "WebSocket" -f markdown -o ws.md  # Raw MDX
-bun-docs-mcp-proxy -s "test" -f text                    # Plain text
+bun-docs -s "Bun.serve"                          # JSON with matching excerpts
+bun-docs -s "server" -f text --limit 3           # Three compact results
+bun-docs -s "WebSocket" -f markdown -o ws.md      # Markdown result summaries
+bun-docs -s "server" -f markdown --full -l 1      # Best matching page in full
 ```
 
+Search returns up to ten results by default. Each result includes a short
+passage from the page matching the query, even when the documentation index has
+no description. Use `--limit` (`-l`) to choose the number of results and
+`--full` to include complete page bodies in any format. JSON keeps the title,
+URL, description, and score fields and adds `excerpt`; `--full` also adds
+`content`. Successful searches are quiet on stderr unless you set `RUST_LOG` or
+save to a file. `--format` requires one of `json`, `text`, or `markdown`.
+
 ### MCP Server
+
+Implements
+[MCP 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28) over
+stdio. Clients send the protocol version and client capabilities in each
+request's `params._meta`. `server/discover` reports the supported version and
+server capabilities; `tools/list` and `tools/call` work directly without a
+handshake. Older protocol versions and `initialize` are unsupported.
 
 Add to your `.mcp.json`:
 
@@ -36,13 +54,13 @@ Add to your `.mcp.json`:
 {
   "mcpServers": {
     "bun-docs": {
-      "command": "/path/to/bun-docs-mcp-proxy"
+      "command": "/path/to/bun-docs"
     }
   }
 }
 ```
 
-Or install the [Zed extension][zed-extension] (auto-downloads the proxy).
+Or install the [Zed extension][zed-extension] (auto-downloads the binary).
 
 ## Documentation
 

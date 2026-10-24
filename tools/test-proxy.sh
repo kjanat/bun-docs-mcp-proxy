@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Test script for Rust MCP proxy
+# Test script for the local Bun documentation MCP server
 set -e
 
 # Get script directory and project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-PROXY="$PROJECT_ROOT/target/release/bun-docs-mcp-proxy"
+PROXY="$PROJECT_ROOT/target/release/bun-docs"
 
-echo "=== Bun Docs MCP Proxy Test Suite ==="
+echo "=== Bun Docs MCP Test Suite ==="
 echo ""
 
 # Build if needed
@@ -20,8 +20,8 @@ fi
 
 # Test 1: tools/list
 echo "[Test 1] Testing tools/list method..."
-RESULT=$(echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | $PROXY 2>/dev/null)
-if echo "$RESULT" | jq -e '.result.tools[0].name == "SearchBun"' >/dev/null; then
+RESULT=$(echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' | $PROXY 2>/dev/null)
+if echo "$RESULT" | jq -e '.result.tools[0].name == "search_bun"' >/dev/null; then
 	echo "✅ tools/list works"
 else
 	echo "✗ tools/list failed"
@@ -30,22 +30,22 @@ else
 fi
 echo ""
 
-# Test 2: initialize
-echo "[Test 2] Testing initialize method..."
-RESULT=$(echo '{"jsonrpc":"2.0","id":2,"method":"initialize","params":{}}' | $PROXY 2>/dev/null)
-if echo "$RESULT" | jq -e '.result.serverInfo.name == "bun-docs-mcp-proxy"' >/dev/null; then
-	echo "✅ initialize works"
+# Test 2: server discovery
+echo "[Test 2] Testing server/discover method..."
+RESULT=$(echo '{"jsonrpc":"2.0","id":2,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' | $PROXY 2>/dev/null)
+if echo "$RESULT" | jq -e '.result._meta["io.modelcontextprotocol/serverInfo"].name == "bun-docs" and .result.supportedVersions == ["2026-07-28"]' >/dev/null; then
+	echo "✅ server/discover works"
 else
-	echo "✗ initialize failed"
+	echo "✗ server/discover failed"
 	echo "$RESULT" | jq '.'
 	exit 1
 fi
 echo ""
 
-# Test 3: tools/call with SearchBun
-echo "[Test 3] Testing tools/call with SearchBun..."
+# Test 3: tools/call with local search_bun
+echo "[Test 3] Testing tools/call with search_bun..."
 echo "  Query: 'WebSocket'"
-RESULT=$(echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"SearchBun","arguments":{"query":"WebSocket"}}}' | timeout 10s $PROXY 2>/dev/null)
+RESULT=$(echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_bun","arguments":{"query":"WebSocket"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' | timeout 30s $PROXY 2>/dev/null)
 if echo "$RESULT" | jq -e '.result.content | length > 0' >/dev/null; then
 	COUNT=$(echo "$RESULT" | jq '.result.content | length')
 	echo "✅ tools/call works (returned $COUNT results)"
@@ -62,19 +62,21 @@ RESULT=$(echo 'invalid json' | $PROXY 2>/dev/null)
 if echo "$RESULT" | jq -e '.error.code == -32700' >/dev/null; then
 	echo "✅ Error handling works (Parse error)"
 else
-	echo "⚠ Error handling unexpected"
+	echo "✗ Error handling unexpected"
 	echo "$RESULT" | jq '.'
+	exit 1
 fi
 echo ""
 
 # Test 5: Unknown method
 echo "[Test 5] Testing unknown method..."
-RESULT=$(echo '{"jsonrpc":"2.0","id":5,"method":"unknown_method"}' | $PROXY 2>/dev/null)
+RESULT=$(echo '{"jsonrpc":"2.0","id":5,"method":"unknown_method","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' | $PROXY 2>/dev/null)
 if echo "$RESULT" | jq -e '.error.code == -32601' >/dev/null; then
 	echo "✅ Unknown method handled correctly"
 else
-	echo "⚠ Unknown method handling unexpected"
+	echo "✗ Unknown method handling unexpected"
 	echo "$RESULT" | jq '.'
+	exit 1
 fi
 echo ""
 
@@ -104,11 +106,11 @@ fi
 
 echo ""
 echo "Startup time (tools/list):"
-{ time echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | $PROXY >/dev/null 2>&1; } 2>&1 | grep real | awk '{print "  " $2}'
+{ time echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' | $PROXY >/dev/null 2>&1; } 2>&1 | grep real | awk '{print "  " $2}'
 
 echo ""
 echo "Full request time (tools/call):"
-{ time echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"SearchBun","arguments":{"query":"test"}}}' | $PROXY >/dev/null 2>&1; } 2>&1 | grep real | awk '{print "  " $2}'
+{ time echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_bun","arguments":{"query":"test"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' | $PROXY >/dev/null 2>&1; } 2>&1 | grep real | awk '{print "  " $2}'
 
 echo ""
-echo "✅ Proxy is production-ready!"
+echo "✅ Local MCP server is production-ready!"

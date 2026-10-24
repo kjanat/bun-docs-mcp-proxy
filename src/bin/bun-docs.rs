@@ -1,26 +1,26 @@
 //! Bun Docs MCP Proxy CLI entry point.
 //!
 //! Two modes:
-//! - **MCP server mode** (default): reads JSON-RPC over stdin/stdout, proxies to bun.com/docs/mcp.
-//! - **CLI mode** (`--search ...`): performs a Bun docs query and prints/writes results.
+//! - **MCP server mode** (default): serves the local Bun documentation index over stdio.
+//! - **CLI mode** (`--search ...`): searches Bun's static documentation corpus locally.
 //!
 //! ## Request Flow (MCP mode)
 //!
 //! ```text
-//! stdin (JSON-RPC) -> Proxy -> HTTP POST -> bun.com/docs/mcp -> SSE stream -> parse -> stdout (JSON-RPC)
+//! stdin (JSON-RPC) -> local documentation index -> stdout (JSON-RPC)
 //! ```
 //!
-//! Upstream transport: HTTP POST returning JSON or SSE; downstream transport: stdio JSON-RPC.
+//! Documentation source: Bun's static `llms.txt` and `llms-full.txt` assets.
 
 use std::fs;
 
 use anyhow::Result;
-use bun_docs_mcp_proxy::{
-    BunDocsClient, UpstreamResponse,
-    format::{format_json, format_markdown, format_text},
+use bun_docs::{
+    docs::{DEFAULT_SEARCH_LIMIT, DocsCorpus, SearchHit},
     run_mcp_server,
 };
 use clap::{Parser, ValueEnum};
+use serde::Serialize;
 use tracing::instrument;
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 
@@ -44,20 +44,23 @@ enum OutputFormat {
     long_about = None,
     after_help = r#"EXAMPLES:
     # Search Bun documentation for "serve" keyword
-    bun-docs-mcp-proxy --search "Bun.serve"
+    bun-docs --search "Bun.serve"
 
-    # Save results as markdown
-    bun-docs-mcp-proxy -s "HTTP server" -f markdown -o results.md
+    # Show three results with matching excerpts
+    bun-docs -s "HTTP server" -f text --limit 3
+
+    # Save the best matching page as Markdown
+    bun-docs -s "HTTP server" -f markdown --full --limit 1 -o results.md
 
     # Export as JSON for processing
-    bun-docs-mcp-proxy --search "WebSocket" --format json --output ws-docs.json
+    bun-docs --search "WebSocket" --format json --output ws-docs.json
 
     # Run as MCP server (default mode, reads from stdin)
-    bun-docs-mcp-proxy
+    bun-docs
 
 ENVIRONMENT:
     RUST_LOG    Set logging level (debug, info, warn, error)
-                Example: RUST_LOG=debug bun-docs-mcp-proxy -s "test"
+                Example: RUST_LOG=debug bun-docs -s "test"
 
 MCP SERVER MODE:
     When run without --search, operates as an MCP (Model Context Protocol) server
@@ -75,6 +78,31 @@ struct Cli {
     /// Output format
     #[arg(short, long, value_enum, default_value_t = OutputFormat::Json)]
     format: OutputFormat,
+
+    /// Maximum number of search results
+    #[arg(short, long, default_value_t = DEFAULT_SEARCH_LIMIT, value_parser = parse_search_limit)]
+    limit: usize,
+
+    /// Include complete page bodies instead of compact excerpts (all formats)
+    #[arg(long, requires = "search")]
+    full: bool,
+}
+
+fn parse_search_limit(value: &str) -> Result<usize, String> {
+    value
+        .parse::<usize>()
+        .ok()
+        .filter(|&limit| limit > 0)
+        .ok_or_else(|| "limit must be a positive integer".to_owned())
+}
+
+#[derive(Debug, Serialize)]
+struct SearchResult {
+    #[serde(flatten)]
+    hit: SearchHit,
+    excerpt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<String>,
 }
 
 /// Resets `SIGPIPE` to default behavior on Unix.
@@ -100,11 +128,11 @@ fn reset_sigpipe() {
 /// Initializes the `tracing` subscriber for logging.
 ///
 /// This function sets up `tracing_subscriber` to filter logs based on the `RUST_LOG`
-/// environment variable (defaulting to `info` if not set) and directs output to `stderr`.
+/// environment variable (defaulting to `warn` if not set) and directs output to `stderr`.
 fn init_logging() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("bun_docs=warn")),
         )
         .with_writer(std::io::stderr)
         .without_time()
@@ -141,14 +169,15 @@ fn validate_output_path(path: &str) -> Result<(), String> {
 
 /// Executes a search query in CLI mode, formats the result, and writes it to the specified output.
 ///
-/// This function orchestrates the CLI search functionality. It builds and sends a `tools/call`
-/// request to the Bun Docs API, formats the response according to the user's choice
-/// (JSON, text, or Markdown), and writes the output to a file or `stdout`.
+/// This function downloads Bun's static documentation sources, builds a local full-text index,
+/// formats the ranked results, and writes the output to a file or `stdout`.
 ///
 /// # Arguments
 /// * `query` - The search query string.
 /// * `format` - The desired `OutputFormat` for the results.
 /// * `output_path` - An optional file path to write the output to. If `None`, output is written to `stdout`.
+/// * `limit` - Maximum number of results.
+/// * `full` - Whether to include complete page bodies.
 ///
 /// # Returns
 /// An `anyhow::Result<()>` indicating success or failure.
@@ -157,48 +186,43 @@ async fn direct_search(
     query: &str,
     format: &OutputFormat,
     output_path: Option<&str>,
+    limit: usize,
+    full: bool,
 ) -> Result<()> {
     // Validate query is not empty
     if query.trim().is_empty() {
         return Err(anyhow::anyhow!("Search query cannot be empty"));
     }
 
-    let client = BunDocsClient::new();
-
     // Validate output path if provided
     if let Some(path) = output_path {
         validate_output_path(path).map_err(|e| anyhow::anyhow!("Invalid output path: {e}"))?;
     }
 
-    // Build search request
-    let request = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 1_i32,
-        "method": "tools/call",
-        "params": {
-            "name": "SearchBun",
-            "arguments": {
-                "query": query
-            }
-        }
-    });
-
-    // Execute search
-    let upstream = client.forward_request(request).await?;
-
-    // Handle upstream response
-    let search_result = match upstream {
-        UpstreamResponse::Ok(result) => result,
-        UpstreamResponse::Err { message, .. } => {
-            return Err(anyhow::anyhow!("API error: {message}"));
-        }
-    };
+    let corpus = DocsCorpus::fetch().await?;
+    let hits = corpus.search(query, limit)?;
+    let results = hits
+        .into_iter()
+        .map(|hit| {
+            let excerpt = corpus.excerpt(query, &hit.url)?;
+            let content = full.then(|| {
+                corpus
+                    .page(&hit.url)
+                    .map_or_else(|| hit.description.clone(), |page| page.body.clone())
+            });
+            Ok(SearchResult {
+                hit,
+                excerpt,
+                content,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
 
     // Format output
     let formatted = match format {
-        OutputFormat::Json => format_json(&search_result)?,
-        OutputFormat::Text => format_text(&search_result)?,
-        OutputFormat::Markdown => format_markdown(&search_result, &client).await?,
+        OutputFormat::Json => serde_json::to_string_pretty(&results)?,
+        OutputFormat::Text => format_search_text(&results),
+        OutputFormat::Markdown => format_search_markdown(&results),
     };
 
     // Write output
@@ -213,6 +237,37 @@ async fn direct_search(
     Ok(())
 }
 
+fn format_search_text(results: &[SearchResult]) -> String {
+    if results.is_empty() {
+        return "No results found.".to_owned();
+    }
+    results
+        .iter()
+        .enumerate()
+        .map(|(index, result)| {
+            let hit = &result.hit;
+            let body = result.content.as_deref().unwrap_or(&result.excerpt);
+            format!("{}. {}\n   {}\n\n{body}", index + 1, hit.title, hit.url)
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn format_search_markdown(results: &[SearchResult]) -> String {
+    if results.is_empty() {
+        return "No results found.".to_owned();
+    }
+    results
+        .iter()
+        .map(|result| {
+            let hit = &result.hit;
+            let body = result.content.as_deref().unwrap_or(&result.excerpt);
+            format!("## [{}]({})\n\n{body}", hit.title, hit.url)
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n---\n\n")
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     #[cfg(unix)]
@@ -223,7 +278,14 @@ async fn main() -> Result<()> {
 
     // CLI search mode
     if let Some(query) = &cli.search {
-        return direct_search(query, &cli.format, cli.output.as_deref()).await;
+        return direct_search(
+            query,
+            &cli.format,
+            cli.output.as_deref(),
+            cli.limit,
+            cli.full,
+        )
+        .await;
     }
 
     // MCP server mode
@@ -232,12 +294,13 @@ async fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::assert_is_empty, reason = "test code")]
     #![allow(clippy::expect_used, reason = "tests can use expect()")]
     #![allow(clippy::unwrap_used, reason = "tests can use unwrap()")]
     #![allow(clippy::indexing_slicing, reason = "tests use array indexing")]
     #![allow(clippy::default_numeric_fallback, reason = "test literals")]
 
-    use bun_docs_mcp_proxy::{JsonRpcRequest, JsonRpcResponse, error_code};
+    use bun_docs::{JsonRpcRequest, JsonRpcResponse, error_code};
     use serde_json::json;
 
     use super::*;
@@ -248,12 +311,12 @@ mod tests {
 
     #[test]
     fn test_parse_valid_jsonrpc_request() {
-        let message = r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#;
+        let message = r#"{"jsonrpc":"2.0","id":1,"method":"server/discover"}"#;
         let request: Result<JsonRpcRequest, _> = serde_json::from_str(message);
 
         assert!(request.is_ok());
         let req = request.unwrap();
-        assert_eq!(req.method, "initialize");
+        assert_eq!(req.method, "server/discover");
         assert_eq!(req.id, Some(json!(1)));
     }
 
@@ -343,25 +406,25 @@ mod tests {
 
     #[test]
     fn test_truncate_for_log_short_string() {
-        let result = bun_docs_mcp_proxy::util::truncate_for_log("hello", 10);
+        let result = bun_docs::util::truncate_for_log("hello", 10);
         assert_eq!(result, "hello");
     }
 
     #[test]
     fn test_truncate_for_log_exact_length() {
-        let result = bun_docs_mcp_proxy::util::truncate_for_log("hello", 5);
+        let result = bun_docs::util::truncate_for_log("hello", 5);
         assert_eq!(result, "hello");
     }
 
     #[test]
     fn test_truncate_for_log_long_string() {
-        let result = bun_docs_mcp_proxy::util::truncate_for_log("hello world", 5);
+        let result = bun_docs::util::truncate_for_log("hello world", 5);
         assert_eq!(result, "hello...");
     }
 
     #[test]
     fn test_truncate_for_log_empty_string() {
-        let result = bun_docs_mcp_proxy::util::truncate_for_log("", 10);
+        let result = bun_docs::util::truncate_for_log("", 10);
         assert_eq!(result, "");
     }
 
@@ -397,21 +460,36 @@ mod tests {
 
     #[tokio::test]
     async fn test_direct_search_empty_query() {
-        let result = direct_search("", &OutputFormat::Json, None).await;
+        let result =
+            direct_search("", &OutputFormat::Json, None, DEFAULT_SEARCH_LIMIT, false).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("cannot be empty"));
     }
 
     #[tokio::test]
     async fn test_direct_search_whitespace_only_query() {
-        let result = direct_search("   ", &OutputFormat::Json, None).await;
+        let result = direct_search(
+            "   ",
+            &OutputFormat::Json,
+            None,
+            DEFAULT_SEARCH_LIMIT,
+            false,
+        )
+        .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("cannot be empty"));
     }
 
     #[tokio::test]
     async fn test_direct_search_invalid_output_path() {
-        let result = direct_search("test", &OutputFormat::Json, Some("../output.json")).await;
+        let result = direct_search(
+            "test",
+            &OutputFormat::Json,
+            Some("../output.json"),
+            DEFAULT_SEARCH_LIMIT,
+            false,
+        )
+        .await;
         assert!(result.is_err());
         assert!(
             result
@@ -421,6 +499,71 @@ mod tests {
         );
     }
 
+    fn result_fixture(full: bool) -> SearchResult {
+        SearchResult {
+            hit: SearchHit {
+                title: "Server".to_owned(),
+                url: "https://bun.com/docs/runtime/http/server".to_owned(),
+                description: String::new(),
+                score: 1.0,
+            },
+            excerpt: "Use Bun.serve to start a server...".to_owned(),
+            content: full
+                .then(|| "Use Bun.serve to start a server.\n\nComplete example.".to_owned()),
+        }
+    }
+
+    #[test]
+    fn compact_formats_include_excerpts_without_full_pages() {
+        let results = [result_fixture(false)];
+        let text = format_search_text(&results);
+        let markdown = format_search_markdown(&results);
+        let json = serde_json::to_value(&results).unwrap();
+        assert!(text.starts_with("1. Server\n"));
+        assert!(markdown.starts_with("## [Server](https://bun.com/docs/runtime/http/server)"));
+        for output in [text, markdown] {
+            assert!(output.contains("Use Bun.serve to start a server..."));
+            assert!(!output.contains("Complete example."));
+        }
+        assert_eq!(json[0]["excerpt"], results[0].excerpt);
+        assert!(json[0].get("content").is_none());
+    }
+
+    #[test]
+    fn full_pages_are_available_in_every_format() {
+        let results = [result_fixture(true)];
+        for output in [
+            format_search_text(&results),
+            format_search_markdown(&results),
+        ] {
+            assert!(output.contains("Complete example."));
+        }
+        let json = serde_json::to_value(&results).unwrap();
+        assert_eq!(json[0]["content"], results[0].content.as_deref().unwrap());
+    }
+
+    #[test]
+    fn empty_results_are_explicit_and_json_stays_an_array() {
+        assert_eq!(format_search_text(&[]), "No results found.");
+        assert_eq!(format_search_markdown(&[]), "No results found.");
+        assert_eq!(
+            serde_json::to_string(&Vec::<SearchResult>::new()).unwrap(),
+            "[]"
+        );
+    }
+
+    #[test]
+    fn cli_limits_and_full_page_options() {
+        let cli = Cli::try_parse_from(["bun-docs", "-s", "server", "-l", "1", "--full"]).unwrap();
+        assert_eq!(cli.limit, 1);
+        assert!(cli.full);
+        for value in ["0", "-1", "abc"] {
+            Cli::try_parse_from(["bun-docs", "-s", "server", "--limit", value]).unwrap_err();
+        }
+        Cli::try_parse_from(["bun-docs", "--full"]).unwrap_err();
+        Cli::try_parse_from(["bun-docs", "-s", "server", "--format"]).unwrap_err();
+    }
+
     // ============================================================================
     // CLI Integration Tests (require network)
     // ============================================================================
@@ -428,21 +571,42 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "integration-tests")]
     async fn test_direct_search_json_format() {
-        let result = direct_search("Bun.serve", &OutputFormat::Json, None).await;
+        let result = direct_search(
+            "Bun.serve",
+            &OutputFormat::Json,
+            None,
+            DEFAULT_SEARCH_LIMIT,
+            false,
+        )
+        .await;
         result.unwrap();
     }
 
     #[tokio::test]
     #[cfg(feature = "integration-tests")]
     async fn test_direct_search_text_format() {
-        let result = direct_search("HTTP", &OutputFormat::Text, None).await;
+        let result = direct_search(
+            "HTTP",
+            &OutputFormat::Text,
+            None,
+            DEFAULT_SEARCH_LIMIT,
+            false,
+        )
+        .await;
         result.unwrap();
     }
 
     #[tokio::test]
     #[cfg(feature = "integration-tests")]
     async fn test_direct_search_markdown_format() {
-        let result = direct_search("server", &OutputFormat::Markdown, None).await;
+        let result = direct_search(
+            "server",
+            &OutputFormat::Markdown,
+            None,
+            DEFAULT_SEARCH_LIMIT,
+            false,
+        )
+        .await;
         result.unwrap();
     }
 
@@ -456,7 +620,14 @@ mod tests {
             .unwrap();
         let output_path = temp_file.path().file_name().unwrap().to_str().unwrap();
 
-        let result = direct_search("test", &OutputFormat::Json, Some(output_path)).await;
+        let result = direct_search(
+            "test",
+            &OutputFormat::Json,
+            Some(output_path),
+            DEFAULT_SEARCH_LIMIT,
+            false,
+        )
+        .await;
         result.unwrap();
 
         // Verify file was created
@@ -479,7 +650,14 @@ mod tests {
             .unwrap();
         let output_path = temp_file.path().file_name().unwrap().to_str().unwrap();
 
-        let result = direct_search("Bun", &OutputFormat::Markdown, Some(output_path)).await;
+        let result = direct_search(
+            "Bun",
+            &OutputFormat::Markdown,
+            Some(output_path),
+            DEFAULT_SEARCH_LIMIT,
+            false,
+        )
+        .await;
         result.unwrap();
 
         // Verify file was created
@@ -508,7 +686,14 @@ mod tests {
         assert!(std::path::Path::new(output_path).exists());
 
         // Should overwrite
-        let result = direct_search("test", &OutputFormat::Json, Some(output_path)).await;
+        let result = direct_search(
+            "test",
+            &OutputFormat::Json,
+            Some(output_path),
+            DEFAULT_SEARCH_LIMIT,
+            false,
+        )
+        .await;
         result.unwrap();
 
         // Verify new content
