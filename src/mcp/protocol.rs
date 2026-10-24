@@ -79,7 +79,8 @@ pub struct JsonRpcRequest {
 pub struct JsonRpcResponse {
     /// Protocol version (always "2.0")
     pub jsonrpc: String,
-    /// Request identifier (matches the request id)
+    /// Request identifier; omitted when a malformed request has no valid ID.
+    #[serde(skip_serializing_if = "Value::is_null")]
     pub id: Value,
     /// Successful result (mutually exclusive with error)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -142,6 +143,7 @@ pub enum JsonRpcEnvelope {
         /// The error object
         error: JsonRpcErrorObject,
         /// Request identifier
+        #[serde(default)]
         #[allow(dead_code, reason = "required for serde deserialization")]
         id: Value,
     },
@@ -657,24 +659,24 @@ mod tests {
     }
 
     #[test]
-    fn parse_error_response_has_null_id() {
-        // Per spec, parse errors MUST use id: null
+    fn parse_error_response_omits_unknown_id() {
+        // MCP error responses omit the ID when the request ID could not be read.
         let response = JsonRpcResponse::error(
             serde_json::Value::Null,
             -32_700_i32,
             "Parse error".to_owned(),
         );
         let serialized = serde_json::to_value(&response).unwrap();
-        assert_eq!(serialized["id"], serde_json::Value::Null);
+        assert!(serialized.get("id").is_none());
         assert_eq!(serialized["error"]["code"], -32_700);
     }
 
     #[test]
-    fn request_with_null_id_gets_response_with_null_id() {
-        // Request with id: null should get a response with id: null
-        let response = JsonRpcResponse::success(serde_json::Value::Null, json!({"result": "ok"}));
+    fn request_with_string_id_gets_matching_response() {
+        // A successful response echoes the valid request ID.
+        let response = JsonRpcResponse::success(json!("request"), json!({"result": "ok"}));
         let serialized = serde_json::to_value(&response).unwrap();
-        assert_eq!(serialized["id"], serde_json::Value::Null);
+        assert_eq!(serialized["id"], "request");
         assert!(serialized["result"].is_object());
     }
 

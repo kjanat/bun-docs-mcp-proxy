@@ -10,12 +10,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
+      - uses: kjanat/setup-tombi@v1
       - uses: kjanat/install-dprint@v2
       - uses: $/.github/actions/rust-setup
         with: { install-just: "false" }
-
-      - name: Install formatters
-        run: bun i -g tombi --trust
 
       - name: Format all files
         run: dprint fmt --allow-no-files --excludes .github

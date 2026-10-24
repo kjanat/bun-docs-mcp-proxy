@@ -25,7 +25,7 @@ alias t := test
 alias tu := test-unit
 alias tio := test-integration-only
 alias twi := test-with-integration
-alias ti := test-integration
+alias ti := test-integration-only
 alias tn := test-nextest
 alias cov := coverage
 alias covh := coverage-html
@@ -101,11 +101,6 @@ test-with-integration *args:
 test-doc:
     @echo "No doc tests available for binary-only crate"
 
-# Run integration tests only (Linux/macOS)
-[group('test')]
-test-integration: build-release
-    bash tools/test-proxy.sh
-
 # Run tests with nextest (faster, JUnit output)
 [group('test')]
 test-nextest:
@@ -113,7 +108,7 @@ test-nextest:
 
 # Run all tests (unit + integration)
 [group('test')]
-test-all: test test-integration
+test-all: test-with-integration
 
 # ===== Coverage Tasks =====
 

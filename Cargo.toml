@@ -47,6 +47,7 @@ features = ["env-filter"]
 
 [dev-dependencies]
 assert_cmd = "2"
+jsonschema = { version = "0.60", default-features = false }
 predicates = "3"
 tempfile   = "3"
 

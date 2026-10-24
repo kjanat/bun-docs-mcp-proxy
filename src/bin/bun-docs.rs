@@ -368,11 +368,11 @@ mod tests {
     }
 
     #[test]
-    fn test_response_null_id() {
+    fn test_error_response_omits_unknown_id() {
         let response = JsonRpcResponse::error(json!(null), -32700, "Error".to_owned());
         let serialized = serde_json::to_value(&response).unwrap();
 
-        assert!(serialized["id"].is_null());
+        assert!(serialized.get("id").is_none());
     }
 
     #[test]

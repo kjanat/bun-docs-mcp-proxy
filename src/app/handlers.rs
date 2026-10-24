@@ -8,6 +8,18 @@ use crate::{
     util::truncate_utf8,
 };
 
+// The discovery information and tool definitions are static and public.
+const METADATA_TTL_MS: u64 = 300_000;
+
+fn server_metadata() -> serde_json::Value {
+    serde_json::json!({
+        "io.modelcontextprotocol/serverInfo": {
+            "name": SERVER_NAME,
+            "version": env!("CARGO_PKG_VERSION")
+        }
+    })
+}
+
 /// Reports the server's supported protocol revision, capabilities, and identity.
 #[must_use]
 pub fn handle_discover(request_id: serde_json::Value) -> JsonRpcResponse {
@@ -15,16 +27,13 @@ pub fn handle_discover(request_id: serde_json::Value) -> JsonRpcResponse {
         request_id,
         serde_json::json!({
             "resultType": "complete",
+            "ttlMs": METADATA_TTL_MS,
+            "cacheScope": "public",
             "supportedVersions": [MCP_PROTOCOL_VERSION],
             "capabilities": {
                 "tools": {}
             },
-            "_meta": {
-                "io.modelcontextprotocol/serverInfo": {
-                    "name": SERVER_NAME,
-                    "version": env!("CARGO_PKG_VERSION")
-                }
-            }
+            "_meta": server_metadata()
         }),
     )
 }
@@ -36,6 +45,9 @@ pub fn handle_tools_list(request_id: serde_json::Value) -> JsonRpcResponse {
         request_id,
         serde_json::json!({
             "resultType": "complete",
+            "ttlMs": METADATA_TTL_MS,
+            "cacheScope": "public",
+            "_meta": server_metadata(),
             "tools": [{
                 "name": "search_bun",
                 "title": "Search bun.com",
@@ -85,9 +97,18 @@ pub fn handle_tools_call(
         return invalid_params(request_id, format!("Tool {name} not found"));
     }
 
-    let Some(arguments) = params.get("arguments") else {
+    let Some(arguments) = params
+        .get("arguments")
+        .and_then(serde_json::Value::as_object)
+    else {
         return invalid_params(request_id, "search_bun requires arguments");
     };
+    if arguments.keys().any(|key| key != "query" && key != "limit") {
+        return invalid_params(
+            request_id,
+            "search_bun accepts only query and limit arguments",
+        );
+    }
     let Some(query) = arguments.get("query").and_then(|value| value.as_str()) else {
         return invalid_params(request_id, "search_bun requires a string query");
     };
@@ -138,7 +159,7 @@ pub fn handle_tools_call(
 
     JsonRpcResponse::success(
         request_id,
-        serde_json::json!({ "resultType": "complete", "content": content }),
+        serde_json::json!({ "resultType": "complete", "content": content, "_meta": server_metadata() }),
     )
 }
 

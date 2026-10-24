@@ -52,8 +52,8 @@ pub async fn run_mcp_server() -> anyhow::Result<()> {
             truncate_for_log(&message, 500)
         );
 
-        // Parse JSON-RPC request
-        let request: JsonRpcRequest = match serde_json::from_str(&message) {
+        // Distinguish invalid JSON from a valid JSON value with an invalid RPC shape.
+        let parsed: serde_json::Value = match serde_json::from_str(&message) {
             Ok(req) => req,
             Err(e) => {
                 error!(
@@ -62,7 +62,7 @@ pub async fn run_mcp_server() -> anyhow::Result<()> {
                     truncate_for_log(&message, 200)
                 );
 
-                // JSON-RPC 2.0 spec: parse errors MUST use id: null
+                // MCP omits the response ID when no valid request ID is available.
                 let error_response = JsonRpcResponse::error(
                     serde_json::Value::Null,
                     error_code::PARSE_ERROR,
@@ -78,13 +78,32 @@ pub async fn run_mcp_server() -> anyhow::Result<()> {
             }
         };
 
+        let parsed_id = parsed
+            .get("id")
+            .filter(|id| id.is_string() || id.is_i64() || id.is_u64())
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let request: JsonRpcRequest = match serde_json::from_value(parsed) {
+            Ok(request) => request,
+            Err(error) => {
+                let response = JsonRpcResponse::error(
+                    parsed_id,
+                    error_code::INVALID_REQUEST,
+                    format!("Invalid Request: {error}"),
+                );
+                transport
+                    .write_message(&serde_json::to_string(&response)?)
+                    .await?;
+                continue;
+            }
+        };
+
         // JSON-RPC 2.0: validate jsonrpc version field
         // Missing or invalid jsonrpc should return -32600 (Invalid Request), not Parse Error
         let jsonrpc_version = request.jsonrpc.as_deref().unwrap_or("");
         if jsonrpc_version != "2.0" {
-            let request_id = request.id.clone().unwrap_or(serde_json::Value::Null);
             let error_response = JsonRpcResponse::error(
-                request_id,
+                parsed_id,
                 error_code::INVALID_REQUEST,
                 format!(
                     "Invalid Request: jsonrpc must be exactly \"2.0\", got {:?}",

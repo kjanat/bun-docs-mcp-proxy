@@ -46,7 +46,11 @@ Implements
 stdio. Clients send the protocol version and client capabilities in each
 request's `params._meta`. `server/discover` reports the supported version and
 server capabilities; `tools/list` and `tools/call` work directly without a
-handshake. Older protocol versions and `initialize` are unsupported.
+handshake. Discovery and tool-list results include public caching hints with a
+five-minute TTL. Every successful result includes server identity metadata.
+Malformed JSON returns `-32700`; malformed JSON-RPC requests return `-32600`.
+Errors omit the response ID when no valid request ID is available. Older
+protocol versions and `initialize` are unsupported.
 
 Add to your `.mcp.json`:
 

@@ -137,6 +137,28 @@ pub(crate) fn request_error(
                 .to_owned(),
         ));
     }
+    if request.method == "tools/list"
+        && request
+            .params
+            .as_ref()
+            .and_then(|params| params.get("cursor"))
+            .is_some()
+    {
+        return Some(JsonRpcResponse::error(
+            request_id,
+            error_code::INVALID_PARAMS,
+            "Invalid cursor: this server returns its complete tool list in one page".to_owned(),
+        ));
+    }
+    if request.params.as_ref().is_some_and(|params| {
+        params.get("inputResponses").is_some() || params.get("requestState").is_some()
+    }) {
+        return Some(JsonRpcResponse::error(
+            request_id,
+            error_code::INVALID_PARAMS,
+            "This server has no input requests to resume".to_owned(),
+        ));
+    }
     None
 }
 
