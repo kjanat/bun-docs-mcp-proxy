@@ -1,10 +1,10 @@
+import { collectArtifacts } from "#artifacts";
+import { resolveConfig } from "#config";
+import { buildReleaseNotes } from "#release-notes";
+import type { ReleaseInputs, ReleaseOutputs } from "#types";
 import type { Toolkit } from "actions-toolkit";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { collectArtifacts } from "./artifacts";
-import { resolveConfig } from "./config";
-import { buildReleaseNotes } from "./release-notes";
-import type { ReleaseInputs, ReleaseOutputs } from "./types";
 
 export const run = async (tools: Toolkit<ReleaseInputs, ReleaseOutputs>): Promise<void> => {
   const config = resolveConfig(tools);
@@ -22,10 +22,7 @@ export const run = async (tools: Toolkit<ReleaseInputs, ReleaseOutputs>): Promis
     tmpDir: config.tmpDir,
   });
 
-  if (artifactFiles.length === 0) {
-    tools.exit.failure("No release artifacts found for this workflow run.");
-    return;
-  }
+  if (artifactFiles.length === 0) tools.exit.failure("No release artifacts found for this workflow run.");
 
   const notes = buildReleaseNotes({
     version: config.version,

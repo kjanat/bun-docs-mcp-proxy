@@ -20,7 +20,7 @@ updates:
 
   # npm (custom GitHub Actions)
   - package-ecosystem: "bun"
-    directory: "/.github/actions"
+    directory: "/"
     schedule: { interval: monthly }
     labels: ["dependencies", "javascript"]
     open-pull-requests-limit: 2

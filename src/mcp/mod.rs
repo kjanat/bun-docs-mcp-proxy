@@ -22,14 +22,12 @@ pub use protocol::{
 /// Used for type-safe method dispatch in the main request handler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Method {
-    /// Initialize the MCP connection
-    Initialize,
+    /// Discover supported protocol versions and server capabilities
+    Discover,
     /// List available tools
     ToolsList,
     /// Call a tool
     ToolsCall,
-    /// Notification that client is initialized (no response expected)
-    NotificationsInitialized,
 }
 
 impl Method {
@@ -37,10 +35,9 @@ impl Method {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Initialize => "initialize",
+            Self::Discover => "server/discover",
             Self::ToolsList => "tools/list",
             Self::ToolsCall => "tools/call",
-            Self::NotificationsInitialized => "notifications/initialized",
         }
     }
 }
@@ -56,10 +53,9 @@ impl FromStr for Method {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "initialize" => Ok(Self::Initialize),
+            "server/discover" => Ok(Self::Discover),
             "tools/list" => Ok(Self::ToolsList),
             "tools/call" => Ok(Self::ToolsCall),
-            "notifications/initialized" => Ok(Self::NotificationsInitialized),
             _ => Err(()),
         }
     }
@@ -83,11 +79,91 @@ pub mod content_type {
 // Protocol Constants
 // ============================================================================
 
-/// MCP protocol version string.
-pub const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
+/// Current published MCP protocol revision implemented by this server.
+pub const MCP_PROTOCOL_VERSION: &str = "2026-07-28";
 
-/// Server name for MCP initialization.
-pub const SERVER_NAME: &str = "bun-docs-mcp-proxy";
+/// Validates the required per-request metadata and MCP request identifier.
+pub(crate) fn request_error(
+    request: &JsonRpcRequest,
+    request_id: serde_json::Value,
+) -> Option<JsonRpcResponse> {
+    if !request_id.is_string() && !request_id.is_i64() && !request_id.is_u64() {
+        return Some(JsonRpcResponse::error(
+            serde_json::Value::Null,
+            error_code::INVALID_REQUEST,
+            "MCP request id must be a string or integer".to_owned(),
+        ));
+    }
+    // Give clients using the removed handshake an actionable diagnostic.
+    if request.method == "initialize" {
+        return Some(JsonRpcResponse::error(
+            request_id,
+            error_code::METHOD_NOT_FOUND,
+            format!(
+                "initialize is not supported; use MCP {MCP_PROTOCOL_VERSION} per-request metadata and server/discover"
+            ),
+        ));
+    }
+    let meta = request
+        .params
+        .as_ref()
+        .and_then(|params| params.get("_meta"));
+    let Some(version) = meta
+        .and_then(|metadata| metadata.get("io.modelcontextprotocol/protocolVersion"))
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Some(JsonRpcResponse::error(
+            request_id,
+            error_code::INVALID_PARAMS,
+            "params._meta must include a string io.modelcontextprotocol/protocolVersion".to_owned(),
+        ));
+    };
+    if version != MCP_PROTOCOL_VERSION {
+        return Some(JsonRpcResponse::error_with_data(
+            request_id,
+            error_code::UNSUPPORTED_PROTOCOL_VERSION,
+            "Unsupported protocol version".to_owned(),
+            serde_json::json!({ "supported": [MCP_PROTOCOL_VERSION], "requested": version }),
+        ));
+    }
+    if !meta
+        .and_then(|metadata| metadata.get("io.modelcontextprotocol/clientCapabilities"))
+        .is_some_and(serde_json::Value::is_object)
+    {
+        return Some(JsonRpcResponse::error(
+            request_id,
+            error_code::INVALID_PARAMS,
+            "params._meta must include an object io.modelcontextprotocol/clientCapabilities"
+                .to_owned(),
+        ));
+    }
+    if request.method == "tools/list"
+        && request
+            .params
+            .as_ref()
+            .and_then(|params| params.get("cursor"))
+            .is_some()
+    {
+        return Some(JsonRpcResponse::error(
+            request_id,
+            error_code::INVALID_PARAMS,
+            "Invalid cursor: this server returns its complete tool list in one page".to_owned(),
+        ));
+    }
+    if request.params.as_ref().is_some_and(|params| {
+        params.get("inputResponses").is_some() || params.get("requestState").is_some()
+    }) {
+        return Some(JsonRpcResponse::error(
+            request_id,
+            error_code::INVALID_PARAMS,
+            "This server has no input requests to resume".to_owned(),
+        ));
+    }
+    None
+}
+
+/// Server name reported by discovery.
+pub const SERVER_NAME: &str = "bun-docs";
 
 /// Line marker prefix for documentation links in search results.
 pub const LINK_MARKER: &str = "Link: ";
@@ -109,6 +185,8 @@ pub mod error_code {
     pub const INVALID_PARAMS: i32 = -32602;
     /// Internal error - `-32603`
     pub const INTERNAL_ERROR: i32 = -32603;
+    /// Requested MCP protocol revision is unsupported.
+    pub const UNSUPPORTED_PROTOCOL_VERSION: i32 = -32022;
 }
 
 #[cfg(test)]
@@ -118,37 +196,31 @@ mod tests {
 
     #[test]
     fn method_as_str() {
-        assert_eq!(Method::Initialize.as_str(), "initialize");
+        assert_eq!(Method::Discover.as_str(), "server/discover");
         assert_eq!(Method::ToolsList.as_str(), "tools/list");
         assert_eq!(Method::ToolsCall.as_str(), "tools/call");
-        assert_eq!(
-            Method::NotificationsInitialized.as_str(),
-            "notifications/initialized"
-        );
     }
 
     #[test]
     fn method_display() {
-        assert_eq!(format!("{}", Method::Initialize), "initialize");
+        assert_eq!(format!("{}", Method::Discover), "server/discover");
         assert_eq!(format!("{}", Method::ToolsCall), "tools/call");
     }
 
     #[test]
     fn method_from_str_valid() {
-        assert_eq!("initialize".parse::<Method>(), Ok(Method::Initialize));
+        assert_eq!("server/discover".parse::<Method>(), Ok(Method::Discover));
         assert_eq!("tools/list".parse::<Method>(), Ok(Method::ToolsList));
         assert_eq!("tools/call".parse::<Method>(), Ok(Method::ToolsCall));
-        assert_eq!(
-            "notifications/initialized".parse::<Method>(),
-            Ok(Method::NotificationsInitialized)
-        );
     }
 
     #[test]
     fn method_from_str_invalid() {
         let _: () = "unknown".parse::<Method>().unwrap_err();
         let _: () = "".parse::<Method>().unwrap_err();
-        let _: () = "Initialize".parse::<Method>().unwrap_err(); // case sensitive
+        let _: () = "Server/discover".parse::<Method>().unwrap_err(); // case sensitive
+        let _: () = "initialize".parse::<Method>().unwrap_err();
+        let _: () = "notifications/initialized".parse::<Method>().unwrap_err();
         let _: () = "resources/list".parse::<Method>().unwrap_err(); // removed
         let _: () = "resources/read".parse::<Method>().unwrap_err(); // removed
     }
@@ -162,8 +234,8 @@ mod tests {
 
     #[test]
     fn protocol_constants() {
-        assert_eq!(MCP_PROTOCOL_VERSION, "2024-11-05");
-        assert_eq!(SERVER_NAME, "bun-docs-mcp-proxy");
+        assert_eq!(MCP_PROTOCOL_VERSION, "2026-07-28");
+        assert_eq!(SERVER_NAME, "bun-docs");
         assert_eq!(LINK_MARKER, "Link: ");
     }
 
@@ -174,5 +246,6 @@ mod tests {
         assert_eq!(error_code::METHOD_NOT_FOUND, -32_601_i32);
         assert_eq!(error_code::INVALID_PARAMS, -32_602_i32);
         assert_eq!(error_code::INTERNAL_ERROR, -32_603_i32);
+        assert_eq!(error_code::UNSUPPORTED_PROTOCOL_VERSION, -32_022_i32);
     }
 }
