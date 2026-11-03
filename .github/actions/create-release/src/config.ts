@@ -1,9 +1,9 @@
+import { getPayloadInputs, normalizeTag, parseBool, toInputString } from "#guards";
+import { parsePlatforms } from "#platforms";
+import type { ReleaseConfig, ReleaseInputs, ReleaseOutputs } from "#types";
 import type { Toolkit } from "actions-toolkit";
 import * as os from "os";
 import * as path from "path";
-import { getPayloadInputs, normalizeTag, parseBool, toInputString } from "./guards";
-import { parsePlatforms } from "./platforms";
-import type { ReleaseConfig, ReleaseInputs, ReleaseOutputs } from "./types";
 
 const resolveVersion = (payloadTag: unknown, inputTag: unknown, contextRef: string): string | undefined => {
   const payload = normalizeTag(toInputString(payloadTag));
@@ -24,10 +24,7 @@ export const resolveConfig = (
   const payloadInputs = getPayloadInputs(tools.context.payload);
   const version = resolveVersion(payloadInputs.tag, tools.inputs.tag, tools.context.ref);
 
-  if (!version) {
-    tools.exit.failure("No tag found for release.");
-    return null;
-  }
+  if (!version) tools.exit.failure("No tag found for release.");
 
   const draft = parseBool(payloadInputs.draft ?? tools.inputs.draft);
   const prerelease = parseBool(payloadInputs.prerelease ?? tools.inputs.prerelease);
@@ -36,10 +33,7 @@ export const resolveConfig = (
   const repoFull = `${owner}/${repo}`;
 
   const runId = Number(process.env.GITHUB_RUN_ID ?? "");
-  if (!Number.isFinite(runId)) {
-    tools.exit.failure("Missing/invalid GITHUB_RUN_ID (cannot list run artifacts).");
-    return null;
-  }
+  if (!Number.isFinite(runId)) tools.exit.failure("Missing/invalid GITHUB_RUN_ID (cannot list run artifacts).");
 
   const workspace = tools.workspace || process.cwd();
   const artifactsDir = path.join(workspace, "artifacts");

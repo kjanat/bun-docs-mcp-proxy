@@ -62,7 +62,7 @@ mod tests {
         let long = "a".repeat(100_usize);
         let truncated = truncate_utf8(&long, 50_usize);
         assert!(truncated.len() <= 50_usize);
-        assert!(!truncated.is_empty());
+        assert_ne!(truncated, "");
     }
 
     #[test]

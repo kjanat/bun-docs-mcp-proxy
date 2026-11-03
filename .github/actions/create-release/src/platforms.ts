@@ -1,5 +1,5 @@
-import { isRecord } from "./guards";
-import type { PlatformDefinition } from "./types";
+import { isRecord } from "#guards";
+import type { PlatformDefinition } from "#types";
 
 const isPlatformDefinition = (value: unknown): value is PlatformDefinition => {
   if (!isRecord(value)) return false;

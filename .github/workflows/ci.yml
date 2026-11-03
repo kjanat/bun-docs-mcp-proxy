@@ -5,22 +5,20 @@ name: CI
 on:
   push:
     branches: [master]
-    paths:
+    paths: &paths
       - "**/*.rs"
       - "Cargo.*"
+      - "package.json"
+      - "bun.lock"
+      - "tsconfig.json"
+      - "tests/fixtures/**"
       - "**/*.toml"
       - "justfile"
       - ".github/actions/**"
       - ".github/workflows/ci.yml"
   pull_request:
     branches: [master]
-    paths:
-      - "**/*.rs"
-      - "Cargo.*"
-      - "**/*.toml"
-      - "justfile"
-      - ".github/actions/**"
-      - ".github/workflows/ci.yml"
+    paths: *paths
   workflow_dispatch:
   merge_group:
 
@@ -30,15 +28,11 @@ env:
 
 permissions: { contents: read }
 
-# This CI workflow runs fast, network-free unit tests by default.
-# Integration tests that require real API calls to bun.com are disabled
-# for faster CI runs and better reliability.
-#
-# To run integration tests:
-# - Locally: cargo test --features integration-tests
-# - CI: See .github/workflows/integration-tests.yml (scheduled daily + manual)
-
 jobs:
+  integration:
+    name: Integration tests
+    uses: $/.github/workflows/integration-tests.yml
+
   coverage:
     name: Code Coverage
     needs: lint
@@ -69,7 +63,12 @@ jobs:
         with: { components: "rustfmt, clippy" }
       - run: rustup toolchain install nightly --component rustfmt
       - uses: oven-sh/setup-bun@v2
-      - run: bun i -g dprint tombi
+      - name: Check local actions
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+      - uses: kjanat/setup-tombi@v1
+      - uses: kjanat/install-dprint@v2
       - uses: taiki-e/install-action@cargo-deny
       - run: just ci-lint
 
@@ -102,6 +101,6 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: "bun-docs-mcp-proxy-${{ matrix.platform.target }}"
-          path: "target/${{ matrix.platform.target }}/release/bun-docs-mcp-proxy${{ runner.os == 'Windows' && '.exe' || '' }}"
+          name: "bun-docs-${{ matrix.platform.target }}"
+          path: "target/${{ matrix.platform.target }}/release/bun-docs${{ case(runner.os == 'Windows', '.exe', '') }}"
           retention-days: 1

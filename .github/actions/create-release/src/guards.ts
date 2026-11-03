@@ -1,4 +1,4 @@
-import type { Artifact, JsonRecord } from "./types";
+import type { Artifact, JsonRecord } from "#types";
 
 export const isRecord = (value: unknown): value is JsonRecord => typeof value === "object" && value !== null;
 

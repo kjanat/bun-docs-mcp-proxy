@@ -1,5 +1,5 @@
-import { renderPlatformLines } from "./platforms";
-import type { ReleaseNotesParams } from "./types";
+import { renderPlatformLines } from "#platforms";
+import type { ReleaseNotesParams } from "#types";
 
 const fallbackPlatformLines = [
   "- **Linux x86_64**: `bun-docs-mcp-proxy-linux-x86_64.tar.gz`",

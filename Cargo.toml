@@ -1,28 +1,23 @@
 [package]
-name        = "bun-docs-mcp-proxy"
+name        = "bun-docs"
 version     = "2.0.0"
 edition     = "2024"
-description = "MCP proxy for Bun documentation search"
+description = "Local Bun documentation search over MCP and the command line"
 repository  = "https://github.com/kjanat/bun-docs-mcp-proxy"
 license     = "MIT"
 keywords    = ["bun", "documentation", "mcp", "protocol", "proxy"]
 categories  = ["command-line-utilities", "web-programming"]
+autobins    = true
 
 [lib]
-name = "bun_docs_mcp_proxy"
+name = "bun_docs"
 path = "src/lib.rs"
 
-[[bin]]
-name = "bun-docs-mcp-proxy"
-path = "src/bin/bun-docs-mcp-proxy.rs"
-
 [dependencies]
-anyhow             = "1"
-bytes              = "1"
-eventsource-stream = "0.2"
-futures            = "0.3"
-libc               = "0.2"
-serde_json         = "1.0"  # Needed for integration tests (integration-tests feature)
+anyhow     = "1"
+libc       = "0.2"
+serde_json = "1"
+tantivy    = "0.27"
 
 [dependencies.clap]
 version  = "4.6"
@@ -31,7 +26,7 @@ features = ["derive"]
 [dependencies.reqwest]
 version          = "0.13"
 default-features = false
-features         = ["json", "rustls", "stream"]
+features         = ["rustls"]
 
 [dependencies.serde]
 version  = "1"
@@ -52,7 +47,7 @@ features = ["env-filter"]
 
 [dev-dependencies]
 assert_cmd = "2"
-mockito    = "1"
+jsonschema = { version = "0.60", default-features = false }
 predicates = "3"
 tempfile   = "3"
 

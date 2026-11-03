@@ -1,8 +1,8 @@
+import { ensureDir, hashFile, normalizeArtifactDisplayPath, removePath, toBuffer, walk } from "#fs-utils";
+import { isArtifact } from "#guards";
+import type { GitHubClient } from "#types";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { ensureDir, hashFile, normalizeArtifactDisplayPath, removePath, toBuffer, walk } from "./fs-utils";
-import { isArtifact } from "./guards";
-import type { GitHubClient } from "./types";
 
 type ExecFn = (commandLine: string, args?: string[]) => Promise<number>;
 

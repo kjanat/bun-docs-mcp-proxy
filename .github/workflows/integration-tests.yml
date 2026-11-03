@@ -2,16 +2,16 @@
 ---
 name: Integration Tests
 on:
-  schedule: [{ cron: "0 3 * * *" }] # Run daily at 3 AM UTC
-  workflow_dispatch: # Allow manual trigger
+  workflow_call: &i
     inputs: { verbose: { description: "Enable verbose output", required: false, default: false, type: boolean } }
+  workflow_dispatch: *i
 env: { CARGO_TERM_COLOR: always, RUSTFLAGS: "-D warnings" }
 jobs:
   integration-tests:
     name: Integration Tests (Real API)
     runs-on: ubuntu-latest
     permissions: { contents: read }
-    env: { RUST_LOG: "${{ github.event.inputs.verbose == 'true' && 'debug' || 'info' }}" }
+    env: { RUST_LOG: "${{ case(github.event.inputs.verbose == 'true', 'debug', 'info') }}" }
     steps:
       - uses: actions/checkout@v7
 
