@@ -3,7 +3,7 @@
     "@types/bun": "latest"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^5 || ^7.0.0"
   },
   "scripts": {
     "fetch-docs": "bun fetch-docs.ts",
