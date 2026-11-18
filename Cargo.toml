@@ -8,6 +8,12 @@ license     = "MIT"
 keywords    = ["bun", "documentation", "mcp", "protocol", "proxy"]
 categories  = ["command-line-utilities", "web-programming"]
 
+[features]
+default           = []
+# Enable integration tests that make real API calls to bun.com
+# These are disabled by default for faster CI runs
+integration-tests = []
+
 [lib]
 name = "bun_docs_mcp_proxy"
 path = "src/lib.rs"
@@ -55,12 +61,6 @@ assert_cmd = "2"
 mockito    = "1"
 predicates = "3"
 tempfile   = "3"
-
-[features]
-default           = []
-# Enable integration tests that make real API calls to bun.com
-# These are disabled by default for faster CI runs
-integration-tests = []
 
 [lints.clippy]
 alloc_instead_of_core             = "warn"
