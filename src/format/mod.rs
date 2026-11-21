@@ -36,13 +36,12 @@ pub fn extract_content_texts(result: &serde_json::Value) -> Vec<&str> {
     result
         .get("content")
         .and_then(|c| c.as_array())
-        .map(|content| {
+        .map_or_default(|content| {
             content
                 .iter()
                 .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 /// Parses search result content to create a vector of `DocEntry` structs.
